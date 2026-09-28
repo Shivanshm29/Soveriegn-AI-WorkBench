@@ -1,0 +1,92 @@
+policy_version: "1.0.0"
+
+risk_thresholds:
+  low_max: 0.25
+  medium_max: 0.50
+  high_max: 0.75
+  critical_min: 0.75
+
+approval_requirements:
+  risk_levels:
+    - "HIGH"
+    - "CRITICAL"
+  data_sensitivities:
+    - "RESTRICTED"
+  tools:
+    - "sandbox_execute"
+  factors:
+    - "code_execution"
+    - "file_delete"
+    - "system_configuration"
+    - "privileged_operation"
+
+denied_operations:
+  - "external_network_access"
+  - "cloud_model_call"
+  - "remote_telemetry"
+  - "external_api"
+  - "file_delete"
+  - "system_reconfiguration"
+
+sensitive_data_rules:
+  PUBLIC:
+    allowed_operations:
+      - "read"
+      - "write"
+      - "analyze"
+      - "summarize"
+    requires_approval: false
+    requires_audit: false
+  INTERNAL:
+    allowed_operations:
+      - "read"
+      - "write"
+      - "analyze"
+      - "summarize"
+    requires_approval: false
+    requires_audit: false
+  CONFIDENTIAL:
+    allowed_operations:
+      - "read"
+      - "analyze"
+      - "summarize"
+    requires_approval: false
+    requires_audit: true
+  RESTRICTED:
+    allowed_operations:
+      - "read"
+      - "analyze"
+    requires_approval: true
+    requires_audit: true
+
+tool_specific_rules:
+  file_read:
+    base_risk: "LOW"
+    requires_approval: false
+  file_write:
+    base_risk: "MEDIUM"
+    requires_approval: false
+  python_calculation:
+    base_risk: "MEDIUM"
+    requires_approval: false
+  sandbox_execute:
+    base_risk: "HIGH"
+    requires_approval: true
+  knowledge_search:
+    base_risk: "LOW"
+    requires_approval: false
+  ocr:
+    base_risk: "LOW"
+    requires_approval: false
+  create_docx:
+    base_risk: "LOW"
+    requires_approval: false
+  create_xlsx:
+    base_risk: "LOW"
+    requires_approval: false
+
+sovereignty_restrictions:
+  sovereign_mode_required: true
+  deny_external_network: true
+  deny_cloud_endpoints: true
+  override_allowed_by_human: false

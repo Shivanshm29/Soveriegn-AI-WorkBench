@@ -24,10 +24,11 @@ from backend.app.models.errors import (
     ModelResponseError,
     ModelCapabilityError,
 )
-from backend.app.security.network_policy import (
-    validate_sovereign_url,
-    SovereigntyViolationError,
+from backend.app.security.sovereignty_policy import (
+    SovereigntyPolicy,
+    get_sovereignty_policy,
 )
+from backend.app.security.network_policy import SovereigntyViolationError
 
 
 class LocalOpenAIRuntime(ModelRuntime):
@@ -45,6 +46,7 @@ class LocalOpenAIRuntime(ModelRuntime):
         health_timeout: float = 5.0,
         sovereign_mode: bool = True,
         runtime_name: str = "vllm",
+        policy: Optional[SovereigntyPolicy] = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
@@ -52,14 +54,15 @@ class LocalOpenAIRuntime(ModelRuntime):
         self.health_timeout = health_timeout
         self.sovereign_mode = sovereign_mode
         self.runtime_name = runtime_name
+        self.policy = policy or get_sovereignty_policy()
 
-        # Enforce sovereign boundary before allowing connection
+        # Enforce sovereign boundary through central policy before allowing connection
         self._validate_endpoint(self.base_url)
 
     def _validate_endpoint(self, url: str) -> None:
-        """Validate URL under sovereign policy."""
+        """Validate URL under central sovereign policy."""
         try:
-            validate_sovereign_url(url, sovereign_mode=self.sovereign_mode)
+            self.policy.validate_endpoint(url, component="model_runtime")
         except SovereigntyViolationError as e:
             raise ModelConfigurationError(str(e), details={"base_url": url}) from e
 
@@ -137,8 +140,14 @@ class LocalOpenAIRuntime(ModelRuntime):
         endpoint_url = f"{self.base_url}/chat/completions"
 
         try:
-            with httpx.Client(timeout=self.timeout) as client:
+            with httpx.Client(timeout=self.timeout, trust_env=False) as client:
                 resp = client.post(endpoint_url, json=payload, headers=headers)
+                # Redirect protection
+                if resp.is_redirect and "location" in resp.headers:
+                    redirect_url = str(resp.url.join(resp.headers["location"]))
+                    self.policy.validate_endpoint(redirect_url, component="model_runtime:redirect")
+        except SovereigntyViolationError as e:
+            raise ModelConfigurationError(str(e), details={"endpoint_url": endpoint_url}) from e
         except httpx.TimeoutException as e:
             raise ModelTimeoutError(
                 f"Model request to {endpoint_url} timed out after {self.timeout}s",
@@ -149,6 +158,8 @@ class LocalOpenAIRuntime(ModelRuntime):
                 f"Local model server at {self.base_url} is unreachable: {str(e)}",
                 details={"base_url": self.base_url, "model_id": request.model_id},
             ) from e
+        except ModelRuntimeError:
+            raise
         except Exception as e:
             raise ModelRuntimeError(
                 f"Unexpected connection error contacting {self.base_url}: {str(e)}",
@@ -254,8 +265,15 @@ class LocalOpenAIRuntime(ModelRuntime):
         endpoint_url = f"{self.base_url}/models"
 
         try:
-            with httpx.Client(timeout=self.health_timeout) as client:
+            with httpx.Client(timeout=self.health_timeout, trust_env=False) as client:
                 resp = client.get(endpoint_url, headers=headers)
+        except SovereigntyViolationError as e:
+            return RuntimeHealth(
+                status=HealthStatus.MISCONFIGURED,
+                runtime=self.runtime_name,
+                base_url=self.base_url,
+                error=f"Sovereignty violation: {str(e)}",
+            )
         except httpx.TimeoutException as e:
             return RuntimeHealth(
                 status=HealthStatus.TIMEOUT,

@@ -1,10 +1,11 @@
 """Runtime request and response schemas for ModelRuntime layer."""
 
 from typing import List, Optional, Dict, Any, Union, Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ContentPart(BaseModel):
+
     """Part of a multimodal message (text or image)."""
 
     type: Literal["text", "image_url", "image_path"] = "text"
@@ -66,6 +67,14 @@ class ModelRequest(BaseModel):
     response_format: Optional[Dict[str, Any]] = None
     stream: bool = False
 
+    @model_validator(mode="before")
+    @classmethod
+    def populate_aliases(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "model" in data and "model_id" not in data:
+                data["model_id"] = data["model"]
+        return data
+
 
 class ModelResponse(BaseModel):
     """Structured response returned by a model runtime."""
@@ -76,3 +85,12 @@ class ModelResponse(BaseModel):
     usage: Optional[UsageMetadata] = None
     tool_calls: Optional[List[ToolCall]] = None
     raw_response_metadata: Optional[Dict[str, Any]] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def populate_aliases(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "model" in data and "model_id" not in data:
+                data["model_id"] = data["model"]
+        return data
+

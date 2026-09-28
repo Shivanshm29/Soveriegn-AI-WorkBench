@@ -21,11 +21,12 @@ class Settings(BaseSettings):
     # Profile toggle (ADR-002: false by default)
     USE_HIGH_LEVEL_MODELS: bool = False
 
-    # Sovereignty & Zero-Egress Boundary
+    # Sovereignty & Zero-Egress Boundary (Permanently Air-Gapped)
     SOVEREIGN_MODE: bool = True
     ALLOW_EXTERNAL_NETWORK: bool = False
     ALLOW_CLOUD_MODELS: bool = False
     ALLOW_REMOTE_TELEMETRY: bool = False
+    ALLOWED_INTERNAL_HOSTS: list[str] = ["localhost", "127.0.0.1", "::1"]
 
     # Local Model Runtime
     MODEL_RUNTIME: str = "vllm"
