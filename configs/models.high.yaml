@@ -1,0 +1,41 @@
+profile: high
+description: "Higher-capability local profile for a larger GPU server."
+
+models:
+  general_reasoning:
+    id: qwen3-high
+    model_name: Qwen/Qwen3-30B-A3B
+    capabilities:
+      - reasoning
+      - planning
+      - structured_output
+      - tool_selection
+    input_modalities: [text]
+    preferred_runtime: vllm
+    enabled: true
+
+  vision_document:
+    id: qwen3-vl-high
+    model_name: Qwen/Qwen3-VL-30B-A3B-Instruct
+    capabilities:
+      - visual_reasoning
+      - document_understanding
+      - image_understanding
+      - spatial_reasoning
+      - visual_ocr_assistance
+    input_modalities: [text, image]
+    preferred_runtime: vllm
+    enabled: true
+
+  coding:
+    id: qwen3-coder-high
+    model_name: Qwen/Qwen3-Coder-30B-A3B-Instruct
+    capabilities:
+      - code_generation
+      - code_fixing
+      - repository_reasoning
+      - tool_use
+      - agentic_coding
+    input_modalities: [text, code]
+    preferred_runtime: vllm
+    enabled: true

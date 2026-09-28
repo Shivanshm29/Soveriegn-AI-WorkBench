@@ -1,0 +1,39 @@
+profile: small
+description: "Runnable development/demo profile for modest local hardware."
+
+models:
+  general_reasoning:
+    id: qwen3-small
+    model_name: Qwen/Qwen3-4B
+    capabilities:
+      - reasoning
+      - planning
+      - structured_output
+      - tool_selection
+    input_modalities: [text]
+    preferred_runtime: vllm
+    enabled: true
+
+  vision_document:
+    id: qwen3-vl-small
+    model_name: Qwen/Qwen3-VL-4B-Instruct
+    capabilities:
+      - visual_reasoning
+      - document_understanding
+      - image_understanding
+      - visual_ocr_assistance
+    input_modalities: [text, image]
+    preferred_runtime: vllm
+    enabled: true
+
+  coding:
+    id: qwen-coder-small
+    model_name: Qwen/Qwen2.5-Coder-3B-Instruct
+    capabilities:
+      - code_generation
+      - code_fixing
+      - code_reasoning
+      - tool_use
+    input_modalities: [text, code]
+    preferred_runtime: vllm
+    enabled: true
