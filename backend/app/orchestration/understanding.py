@@ -106,6 +106,14 @@ def understand_task(
     except Exception as e:
         raise TaskUnderstandingError(f"Model runtime error during task understanding: {e}") from e
 
+    # Guard against empty model output (e.g. thinking mode with no generated text)
+    if not content or not content.strip():
+        raise TaskUnderstandingError(
+            "Model returned empty output during task understanding. "
+            "This may be caused by thinking-mode token exhaustion. "
+            "Ensure the model has sufficient max_tokens and thinking is disabled."
+        )
+
     # 3. Parse and validate structured output
     parsed = extract_json_from_text(content)
 

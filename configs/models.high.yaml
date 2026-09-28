@@ -23,6 +23,11 @@ models:
       - image_understanding
       - spatial_reasoning
       - visual_ocr_assistance
+      - vision.document_analysis
+      - vision.engineering_analysis
+      - vision.image_understanding
+      - engineering_drawing_observation
+      - engineering_drawing_analysis
     input_modalities: [text, image]
     preferred_runtime: vllm
     enabled: true

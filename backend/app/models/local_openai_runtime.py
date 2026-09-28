@@ -137,6 +137,14 @@ class LocalOpenAIRuntime(ModelRuntime):
         if request.response_format is not None:
             payload["response_format"] = request.response_format
 
+        # Disable Qwen3 "thinking" mode to prevent empty-output errors.
+        # Qwen3 in thinking mode may exhaust thinking tokens without producing
+        # output text, causing the server to return:
+        # "model output must contain either output text or tool calls, these cannot both be empty"
+        model_lower = (request.model_id or "").lower()
+        if "qwen3" in model_lower or "qwen2.5" in model_lower:
+            payload["chat_template_kwargs"] = {"enable_thinking": False}
+
         endpoint_url = f"{self.base_url}/chat/completions"
 
         try:
@@ -173,8 +181,19 @@ class LocalOpenAIRuntime(ModelRuntime):
                 details={"status_code": 404, "body": resp.text},
             )
         elif resp.status_code >= 400:
+            # Attempt to surface a cleaner error from JSON body if available
+            error_detail = resp.text
+            try:
+                err_body = resp.json()
+                if isinstance(err_body, dict):
+                    if "error" in err_body and isinstance(err_body["error"], dict):
+                        error_detail = err_body["error"].get("message", resp.text)
+                    elif "message" in err_body:
+                        error_detail = err_body["message"]
+            except Exception:
+                pass
             raise ModelRuntimeError(
-                f"Local model server error HTTP {resp.status_code}: {resp.text}",
+                f"Local model server error HTTP {resp.status_code}: {error_detail}",
                 details={"status_code": resp.status_code, "body": resp.text},
             )
 
@@ -197,6 +216,10 @@ class LocalOpenAIRuntime(ModelRuntime):
         msg = choice.get("message", {})
         content = msg.get("content")
         finish_reason = choice.get("finish_reason")
+
+        # Normalise: some servers return empty string instead of None
+        if content == "":
+            content = None
 
         # Parse tool calls if present
         tool_calls: Optional[List[ToolCall]] = None
@@ -238,6 +261,11 @@ class LocalOpenAIRuntime(ModelRuntime):
                     f"Model returned invalid JSON for structured output request: {content[:200]}",
                     details={"content": content, "error": str(e)},
                 ) from e
+
+        # Final guard: if both content and tool_calls are absent, use empty string
+        # so downstream consumers receive a valid (if empty) response instead of crashing.
+        if content is None and not tool_calls:
+            content = ""
 
         return ModelResponse(
             model_id=data.get("model", request.model_id),

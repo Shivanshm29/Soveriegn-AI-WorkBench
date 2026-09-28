@@ -230,17 +230,108 @@ class AgentExecutor:
                     result_message=err_msg,
                 )
 
-        # 6. Default execution for document_agent and vision_agent (Phase 6)
+        # 6. Default execution for document_agent and vision_agent
         doc_input = task_context.get("document_input")
         file_path = (
             task_context.get("document_path")
             or task_context.get("source_path")
             or task_context.get("file_path")
+            or task_context.get("image_path")
+            or (task_context.get("metadata") or {}).get("image_path")
+            or (task_context.get("metadata") or {}).get("file_path")
         )
+        if not file_path:
+            import re
+            import os
+            user_req = task_context.get("user_request", "")
+            matches = re.findall(r"([A-Za-z]:\\[^'\"\n\r]+?\.(?:png|jpg|jpeg|bmp|tiff|pdf))", user_req, re.IGNORECASE)
+            if not matches:
+                matches = re.findall(r"(/[^\s'\"<>\n\r]+?\.(?:png|jpg|jpeg|bmp|tiff|pdf))", user_req, re.IGNORECASE)
+            for m in matches:
+                if os.path.exists(m):
+                    file_path = m
+                    break
+
         if not doc_input and file_path:
             from backend.app.multimodal.schemas import DocumentInput
             doc_input = DocumentInput.from_file(file_path)
 
+        # 6a. Vision Agent Engineering & Industrial Vision Analysis (Phase 7)
+        if agent_id == "vision_agent" and file_path:
+            is_eng_cap = step.capability in (
+                "vision.engineering_analysis",
+                "engineering_drawing_analysis",
+                "engineering_drawing_observations",
+                "vision.image_understanding",
+                "industrial_inspection",
+                "candidate_defect_detection",
+                "dimension_extraction",
+                "visual_evidence",
+                "image_understanding",
+            )
+            is_image_file = any(
+                file_path.lower().endswith(ext)
+                for ext in (".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".webp")
+            )
+            if is_eng_cap or is_image_file:
+                try:
+                    from backend.app.vision.agent import EngineeringVisionAgent
+                    vision_agent = EngineeringVisionAgent(
+                        model_runtime=self.model_runtime,
+                    )
+                    if file_path.lower().endswith(".pdf"):
+                        vision_result = vision_agent.process_pdf_drawing(
+                            pdf_path=file_path,
+                            task_id=task_id,
+                            user_focus=step.description,
+                        )
+                    else:
+                        vision_result = vision_agent.process_image(
+                            image_path=file_path,
+                            task_id=task_id,
+                            user_focus=step.description,
+                        )
+
+                    output = {
+                        "vision_result": vision_result.model_dump(),
+                        "step_id": step.step_id,
+                        "agent_id": agent_id,
+                    }
+                    result_msg = A2AMessage(
+                        message_id=str(uuid.uuid4()),
+                        task_id=task_id,
+                        sender=agent_id,
+                        receiver="main_agent",
+                        type="TASK_RESULT",
+                        payload=output,
+                        status="COMPLETED",
+                    )
+                    return AgentExecutionResult(
+                        status="SUCCESS",
+                        agent_id=agent_id,
+                        output=output,
+                        delegation_message=delegation_msg,
+                        result_message=result_msg,
+                    )
+                except Exception as e:
+                    err_msg = A2AMessage(
+                        message_id=str(uuid.uuid4()),
+                        task_id=task_id,
+                        sender=agent_id,
+                        receiver="main_agent",
+                        type="ERROR",
+                        payload={"error": str(e)},
+                        status="FAILED",
+                    )
+                    return AgentExecutionResult(
+                        status="FAILED",
+                        agent_id=agent_id,
+                        error=f"Vision agent execution failed: {e}",
+                        delegation_message=delegation_msg,
+                        result_message=err_msg,
+                    )
+
+        # 6b. Multimodal document execution (Phase 6)
         if agent_id in ("document_agent", "vision_agent") and doc_input:
             try:
                 from backend.app.multimodal.pipeline import MultimodalDocumentPipeline

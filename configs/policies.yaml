@@ -105,6 +105,21 @@ tool_specific_rules:
   vlm_analyze_document:
     base_risk: "LOW"
     requires_approval: false
+  engineering_drawing_analyze:
+    base_risk: "LOW"
+    requires_approval: false
+  industrial_image_inspect:
+    base_risk: "LOW"
+    requires_approval: false
+  image_preprocess_tile:
+    base_risk: "LOW"
+    requires_approval: false
+  visual_region_detect:
+    base_risk: "LOW"
+    requires_approval: false
+  verify_visual_evidence:
+    base_risk: "LOW"
+    requires_approval: false
 
 sovereignty_restrictions:
   sovereign_mode_required: true

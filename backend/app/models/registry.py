@@ -134,7 +134,7 @@ class ModelRegistry:
             return prof.models[model_id_or_slot]
 
         for model in prof.models.values():
-            if model.id == model_id_or_slot:
+            if model.id == model_id_or_slot or model.model_name == model_id_or_slot:
                 return model
         return None
 

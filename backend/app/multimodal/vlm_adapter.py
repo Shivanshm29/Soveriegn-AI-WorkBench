@@ -86,7 +86,9 @@ class VLMDocumentAdapter:
                     max_tokens=500,
                 )
                 response = self.model_runtime.chat(request)
-                observation_text = response.content.strip()
+                observation_text = (response.content or "").strip()
+                if not observation_text:
+                    observation_text = f"VLM returned empty output for page {rendered_page.page_number}."
             except Exception as e:
                 raise VLMError(f"Local VLM inference failed: {e}") from e
         else:
