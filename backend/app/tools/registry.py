@@ -100,11 +100,18 @@ def get_default_tools() -> List[ToolContract]:
 class ToolRegistry:
     """Registry maintaining active tool declarations."""
 
-    def __init__(self, populate_defaults: bool = True):
+    def __init__(self, populate_defaults: bool = True, include_multimodal: bool = False):
         self._tools: Dict[str, ToolContract] = {}
         if populate_defaults:
             for tool in get_default_tools():
                 self._tools[tool.tool_id] = tool
+        if include_multimodal:
+            self.register_multimodal_tools()
+
+    def register_multimodal_tools(self) -> None:
+        """Register Phase 6 multimodal tools into registry."""
+        from backend.app.multimodal.tools import register_multimodal_tools
+        register_multimodal_tools(self)
 
     def register(self, tool: ToolContract, overwrite: bool = False) -> None:
         """Register a new tool contract. Rejects duplicates unless overwrite=True."""

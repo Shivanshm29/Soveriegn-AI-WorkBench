@@ -84,6 +84,27 @@ tool_specific_rules:
   create_xlsx:
     base_risk: "LOW"
     requires_approval: false
+  document_type_detect:
+    base_risk: "LOW"
+    requires_approval: false
+  pdf_text_extract:
+    base_risk: "LOW"
+    requires_approval: false
+  pdf_render:
+    base_risk: "LOW"
+    requires_approval: false
+  layout_analyze:
+    base_risk: "LOW"
+    requires_approval: false
+  table_extract:
+    base_risk: "LOW"
+    requires_approval: false
+  image_extract:
+    base_risk: "LOW"
+    requires_approval: false
+  vlm_analyze_document:
+    base_risk: "LOW"
+    requires_approval: false
 
 sovereignty_restrictions:
   sovereign_mode_required: true

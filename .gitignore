@@ -18,6 +18,7 @@ ENV/
 # Temporary / scratch / runtime data
 data/tasks/
 data/audit/
+data/cache/
 *.log
 
 # IDE & OS files

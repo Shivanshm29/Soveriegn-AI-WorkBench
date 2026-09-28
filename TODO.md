@@ -59,12 +59,13 @@
 - [x] zero-egress sovereignty non-bypassability
 - [x] policy versioning & lifecycle audit events
 
-## Multimodal
-- [ ] PDF parser
-- [ ] page rendering
-- [ ] PaddleOCR
-- [ ] evidence object
-- [ ] Qwen3-VL adapter
+## Multimodal (Phase 6)
+- [x] PDF parser (PyMuPDF local extraction)
+- [x] page rendering (local rasterization)
+- [x] local OCR & coordinates normalization
+- [x] layout & table analysis
+- [x] evidence object & prompt injection defense
+- [x] Qwen3-VL adapter (dynamic ModelRegistry/ModelRuntime resolution)
 
 ## RAG
 - [ ] ingestion

@@ -308,9 +308,9 @@ def test_acceptance_17_no_infinite_approval_loops(tmp_path):
 
 
 def test_acceptance_18_no_phase_6_functionality():
-    """Acceptance 18: No Phase 6+ features (multimodal OCR, RAG, sandbox execution) implemented."""
-    # Verify no multimodal paddleocr or qdrant rag modules exist in orchestration
-    with pytest.raises(ImportError):
-        import backend.app.multimodal  # type: ignore
+    """Acceptance 18: Verify no Phase 7+ features (RAG, sandbox execution) implemented."""
     with pytest.raises(ImportError):
         import backend.app.rag  # type: ignore
+    with pytest.raises(ImportError):
+        import backend.app.sandbox  # type: ignore
+

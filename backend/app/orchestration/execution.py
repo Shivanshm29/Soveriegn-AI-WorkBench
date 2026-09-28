@@ -230,7 +230,66 @@ class AgentExecutor:
                     result_message=err_msg,
                 )
 
-        # 6. Truthful execution: capability not yet implemented in Phase 4
+        # 6. Default execution for document_agent and vision_agent (Phase 6)
+        doc_input = task_context.get("document_input")
+        file_path = (
+            task_context.get("document_path")
+            or task_context.get("source_path")
+            or task_context.get("file_path")
+        )
+        if not doc_input and file_path:
+            from backend.app.multimodal.schemas import DocumentInput
+            doc_input = DocumentInput.from_file(file_path)
+
+        if agent_id in ("document_agent", "vision_agent") and doc_input:
+            try:
+                from backend.app.multimodal.pipeline import MultimodalDocumentPipeline
+                pipeline = MultimodalDocumentPipeline()
+                analysis_result = pipeline.process(
+                    doc_input,
+                    enable_vlm=True,
+                    vlm_query=step.description,
+                )
+                output = {
+                    "document_analysis": analysis_result.model_dump(),
+                    "step_id": step.step_id,
+                    "agent_id": agent_id,
+                }
+                result_msg = A2AMessage(
+                    message_id=str(uuid.uuid4()),
+                    task_id=task_id,
+                    sender=agent_id,
+                    receiver="main_agent",
+                    type="TASK_RESULT",
+                    payload=output,
+                    status="COMPLETED",
+                )
+                return AgentExecutionResult(
+                    status="SUCCESS",
+                    agent_id=agent_id,
+                    output=output,
+                    delegation_message=delegation_msg,
+                    result_message=result_msg,
+                )
+            except Exception as e:
+                err_msg = A2AMessage(
+                    message_id=str(uuid.uuid4()),
+                    task_id=task_id,
+                    sender=agent_id,
+                    receiver="main_agent",
+                    type="ERROR",
+                    payload={"error": str(e)},
+                    status="FAILED",
+                )
+                return AgentExecutionResult(
+                    status="FAILED",
+                    agent_id=agent_id,
+                    error=f"Multimodal document execution failed: {e}",
+                    delegation_message=delegation_msg,
+                    result_message=err_msg,
+                )
+
+        # 7. Truthful execution: capability not yet implemented
         not_impl_msg = A2AMessage(
             message_id=str(uuid.uuid4()),
             task_id=task_id,
@@ -239,15 +298,14 @@ class AgentExecutor:
             type="TASK_RESULT",
             payload={
                 "status": "NOT_IMPLEMENTED",
-                "message": f"Agent '{agent_id}' capability '{step.capability}' is not implemented in Phase 4.",
+                "message": f"Agent '{agent_id}' capability '{step.capability}' is not implemented.",
             },
             status="FAILED",
         )
         return AgentExecutionResult(
             status="NOT_IMPLEMENTED",
             agent_id=agent_id,
-            error=f"Agent '{agent_id}' capability '{step.capability}' is not implemented in Phase 4.",
+            error=f"Agent '{agent_id}' capability '{step.capability}' is not implemented.",
             delegation_message=delegation_msg,
             result_message=not_impl_msg,
-
         )
