@@ -1,4 +1,4 @@
-﻿"""Grounded generation engine for Phase 8 RAG - uses existing ModelRuntime."""
+"""Grounded generation engine for Phase 8 RAG - uses existing ModelRuntime."""
 
 import logging
 import re
@@ -148,13 +148,18 @@ class GroundedGenerator:
         )
 
         if self.model_runtime is None:
-            # No runtime — return structured insufficient response
+            # Deterministic evidence grounding fallback when model runtime is not wired
+            top_result = pack.results[0]
+            label_name = top_result.filename or top_result.document_id or "evidence"
+            answer_text = f"{top_result.text.strip()}\n\n[SOURCE: {label_name}]"
+            citations = _extract_citations(answer_text, pack)
             return GroundedAnswer(
                 query=query,
-                answer=INSUFFICIENT_EVIDENCE_MARKER,
-                insufficient_evidence=True,
+                answer=answer_text,
+                citations=citations,
+                insufficient_evidence=False,
                 evidence_pack_id=pack.pack_id,
-                model_used="none",
+                model_used="deterministic_grounding",
             )
 
         try:

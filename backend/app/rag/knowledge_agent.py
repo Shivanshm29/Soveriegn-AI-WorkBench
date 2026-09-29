@@ -1,4 +1,4 @@
-﻿"""Phase 8 Knowledge Agent - sovereign hybrid RAG agent integrated with AgentRegistry."""
+"""Phase 8 Knowledge Agent - sovereign hybrid RAG agent integrated with AgentRegistry."""
 
 import logging
 from typing import Any, Dict, List, Optional
@@ -219,6 +219,9 @@ class KnowledgeAgent:
         )
 
         return answer
+
+    answer_query = grounded_answer
+
 
     # ------------------------------------------------------------------
     # knowledge.verify

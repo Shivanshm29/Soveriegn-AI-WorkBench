@@ -128,6 +128,7 @@ class VisualObservation(BaseModel):
     evidence_refs: List[str] = Field(default_factory=list)  # Linked EngineeringEvidence IDs
     verification_required: bool = True
     verification_status: str = "PENDING_VERIFICATION"
+    candidate_observation: bool = True
 
 
 class EngineeringFinding(BaseModel):

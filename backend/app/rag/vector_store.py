@@ -1,4 +1,4 @@
-﻿"""Local Qdrant vector store abstraction for Phase 8 RAG."""
+"""Local Qdrant vector store abstraction for Phase 8 RAG."""
 
 import logging
 from typing import Any, Dict, List, Optional
@@ -188,13 +188,25 @@ class VectorStore:
                 qdrant_filter = Filter(must=conditions)
 
         try:
-            hits = client.search(
-                collection_name=self.collection_name,
-                query_vector=query_vector,
-                limit=top_k,
-                query_filter=qdrant_filter,
-                with_payload=True,
-            )
+            if hasattr(client, "query_points"):
+                res = client.query_points(
+                    collection_name=self.collection_name,
+                    query=query_vector,
+                    limit=top_k,
+                    query_filter=qdrant_filter,
+                    with_payload=True,
+                )
+                hits = getattr(res, "points", res)
+            elif hasattr(client, "search"):
+                hits = client.search(
+                    collection_name=self.collection_name,
+                    query_vector=query_vector,
+                    limit=top_k,
+                    query_filter=qdrant_filter,
+                    with_payload=True,
+                )
+            else:
+                hits = []
         except Exception as e:
             raise VectorStoreUnavailableError(
                 f"Qdrant search failed: {e}",

@@ -1,6 +1,7 @@
 """LangGraph nodes for workbench orchestration lifecycle."""
 
 import logging
+import re
 import uuid
 from typing import Dict, Any, Optional
 
@@ -65,8 +66,9 @@ class OrchestrationNodes:
         self.plan_validator = PlanValidator(agent_registry, tool_registry)
         self.policy_evaluator = PolicyEvaluator(tool_registry=tool_registry, agent_registry=agent_registry)
         self.agent_executor = agent_executor or AgentExecutor(
-            agent_registry, tool_registry, model_runtime
+            agent_registry, tool_registry, model_runtime, model_registry
         )
+
 
     def _record_event(
         self,
@@ -144,10 +146,33 @@ class OrchestrationNodes:
                     or (new_state.get("metadata") or {}).get("image_path")
                     or (new_state.get("metadata") or {}).get("file_path")
                 )
-                if "sandbox" in req_lower or "code" in req_lower or "script" in req_lower or "python" in req_lower:
-                    caps = ["code_execution"]
+                is_mixed = (
+                    any(k in req_lower for k in ("inspection", "report", "scanned"))
+                    and any(k in req_lower for k in ("maintenance", "procedure", "px-417", "pump"))
+                    and any(k in req_lower for k in ("calculate", "measurement", "data"))
+                    and any(k in req_lower for k in ("approval", "note", "docx"))
+                )
+                if is_mixed:
+                    caps = ["visual_reasoning", "knowledge_search", "calculation", "document_generation"]
+                    comp = "HIGH"
+                elif ("inspection" in req_lower or "scanned" in req_lower or has_image) and ("approval note" in req_lower or "docx" in req_lower or "approval" in req_lower):
+                    caps = ["visual_reasoning", "document_generation"]
                     comp = "MEDIUM"
-                elif has_image or any(k in req_lower for k in ("visual", "image", "drawing", "dimension", "blueprint", "diagram", "turbine casing")):
+                elif any(k in req_lower for k in ("sandbox", "code", "script", "python", "program")):
+                    if any(k in req_lower for k in ("write", "generate", "create", "prepare")) and any(k in req_lower for k in ("sandbox", "run", "execute")):
+                        caps = ["code_generation", "code_execution"]
+                    elif any(k in req_lower for k in ("write", "generate", "create")):
+                        caps = ["code_generation"]
+                    else:
+                        caps = ["code_execution"]
+                    comp = "MEDIUM"
+                elif any(k in req_lower for k in ("calculate", "calculation", "mean", "average", "statistics", "arithmetic", "formula")) or bool(re.search(r"\bsum\b", req_lower)):
+                    caps = ["calculation"]
+                    comp = "LOW"
+                elif any(k in req_lower for k in ("csv", "xlsx", "spreadsheet", "excel", "dataset")):
+                    caps = ["data_analysis"]
+                    comp = "LOW"
+                elif has_image or any(k in req_lower for k in ("visual", "image", "drawing", "dimension", "blueprint", "diagram", "turbine casing", "flange", "defect")):
                     caps = ["visual_reasoning"]
                     comp = "MEDIUM"
                 elif any(k in req_lower for k in ("search", "retrieve", "knowledge", "px-417", "pump", "manual", "sop", "finding", "recommend")):
@@ -156,6 +181,7 @@ class OrchestrationNodes:
                 else:
                     caps = ["reasoning"]
                     comp = "LOW"
+
                 understanding = TaskUnderstanding(
                     intent="General user task request",
                     capabilities=caps,

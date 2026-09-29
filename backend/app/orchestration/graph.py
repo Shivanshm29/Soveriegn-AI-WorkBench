@@ -7,7 +7,7 @@ from backend.app.models.registry import ModelRegistry
 from backend.app.models.runtime import ModelRuntime
 from backend.app.agents.registry import AgentRegistry
 from backend.app.tools.registry import ToolRegistry
-from backend.app.state.store import StateStore
+from backend.app.state.store import StateStore, InMemoryStateStore
 from backend.app.state.task_state import TaskStatus
 from backend.app.orchestration.state import (
     OrchestrationState,
@@ -135,7 +135,7 @@ class WorkbenchOrchestrator:
         self.agent_registry = agent_registry or AgentRegistry()
         self.tool_registry = tool_registry or ToolRegistry()
         self.model_runtime = model_runtime
-        self.state_store = state_store
+        self.state_store = state_store or InMemoryStateStore()
 
         self.nodes = OrchestrationNodes(
             model_registry=self.model_registry,

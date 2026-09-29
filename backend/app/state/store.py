@@ -232,3 +232,48 @@ class LocalStateStore(StateStore):
         if self.events_dir.exists():
             for p in self.events_dir.glob("*.jsonl"):
                 p.unlink(missing_ok=True)
+
+
+class InMemoryStateStore(StateStore):
+    """In-memory state store useful for fast, isolated test runs and transient tasks."""
+
+    def __init__(self):
+        self._tasks: dict = {}
+        self._events: dict = {}
+
+    def save_task(self, task: TaskState) -> None:
+        self._tasks[task.task_id] = task.model_copy(deep=True)
+
+    def load_task(self, task_id: str) -> Optional[TaskState]:
+        t = self._tasks.get(task_id)
+        return t.model_copy(deep=True) if t else None
+
+    def list_tasks(self, status: Optional[TaskStatus] = None) -> List[TaskState]:
+        res = list(self._tasks.values())
+        if status is not None:
+            res = [t for t in res if t.status == status]
+        res.sort(key=lambda t: t.created_at, reverse=True)
+        return res
+
+    def delete_task(self, task_id: str) -> bool:
+        existed = task_id in self._tasks
+        self._tasks.pop(task_id, None)
+        self._events.pop(task_id, None)
+        return existed
+
+    def record_event(self, event: TaskEvent) -> None:
+        if event.task_id not in self._events:
+            self._events[event.task_id] = []
+        self._events[event.task_id].append(event)
+        if event.task_id in self._tasks:
+            t = self._tasks[event.task_id]
+            if not any(e.event_id == event.event_id for e in t.events):
+                t.events.append(event)
+
+    def get_events(self, task_id: str) -> List[TaskEvent]:
+        return list(self._events.get(task_id, []))
+
+    def clear(self) -> None:
+        self._tasks.clear()
+        self._events.clear()
+

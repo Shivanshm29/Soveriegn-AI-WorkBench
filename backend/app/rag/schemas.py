@@ -1,4 +1,4 @@
-﻿"""Pydantic schemas for Phase 8 Local Hybrid RAG & Sovereign Knowledge Agent."""
+"""Pydantic schemas for Phase 8 Local Hybrid RAG & Sovereign Knowledge Agent."""
 
 import uuid
 from datetime import datetime, timezone
@@ -174,6 +174,10 @@ class CitationRef(BaseModel):
     page_number: Optional[int] = None
     section: Optional[str] = None
     label: str = ""  # e.g. "[DOC-1, p.4, chunk-12]"
+
+    @property
+    def source_document(self) -> str:
+        return self.filename or self.document_id
 
 
 class GroundedAnswer(BaseModel):
