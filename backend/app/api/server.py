@@ -141,13 +141,47 @@ async def upload_file(file: UploadFile = File(...)):
     }
 
 
+@app.get("/api/v1/tasks")
+def list_all_tasks():
+    """Retrieve list of previous tasks for the history sidebar."""
+    tasks = state_store.list_tasks()
+    results = []
+    for t in tasks:
+        results.append({
+            "task_id": t.task_id,
+            "instruction": t.user_query,
+            "status": t.status.value if hasattr(t.status, "value") else str(t.status),
+            "created_at": t.created_at.isoformat() if t.created_at else None,
+            "updated_at": t.updated_at.isoformat() if t.updated_at else None,
+            "file_path": (t.context or {}).get("file_path"),
+            "has_deliverable": bool((t.context or {}).get("final_result")),
+            "event_count": len(state_store.get_events(t.task_id)),
+        })
+    return results
+
+
+@app.get("/api/v1/audit/logs")
+def get_global_audit_logs(limit: int = 50):
+    """Retrieve recent audit events across recent tasks."""
+    recent_tasks = state_store.list_tasks()[:10]
+    all_events = []
+    for t in recent_tasks:
+        evs = state_store.get_events(t.task_id)
+        for e in evs:
+            all_events.append(e.model_dump())
+    all_events.sort(key=lambda x: str(x.get("timestamp", "")), reverse=True)
+    return all_events[:limit]
+
+
 @app.get("/api/v1/tasks/{task_id}")
 def get_task_details(task_id: str):
-    """Retrieve detailed state of a task."""
+    """Retrieve detailed state of a task including events."""
     task = state_store.load_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found.")
-    return task.model_dump()
+    data = task.model_dump()
+    data["events"] = [e.model_dump() for e in state_store.get_events(task_id)]
+    return data
 
 
 @app.get("/api/v1/tasks/{task_id}/events")
@@ -183,6 +217,7 @@ def create_task(payload: TaskRequestPayload):
         "approval_request": state.get("approval_request").model_dump() if hasattr(state.get("approval_request"), "model_dump") else state.get("approval_request"),
         "final_result": state.get("final_result"),
         "verification_results": state.get("verification_results"),
+        "events": [e.model_dump() for e in state_store.get_events(t_id)],
     }
 
 
@@ -218,6 +253,7 @@ def submit_task_approval(task_id: str, payload: ApprovalPayload):
             "status": final_state.get("task_status"),
             "final_result": final_state.get("final_result"),
             "execution_steps": final_state.get("execution_steps", []),
+            "events": [e.model_dump() for e in state_store.get_events(task_id)],
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -355,16 +391,20 @@ INDEX_HTML = """<!DOCTYPE html>
       min-height: 100vh;
       display: flex;
       flex-direction: column;
+      overflow-x: hidden;
     }
 
     /* Top Clean Header */
     header {
       background: var(--surface);
       border-bottom: 1px solid var(--border);
-      padding: 14px 32px;
+      padding: 14px 32px 14px 56px;
       display: flex;
       justify-content: space-between;
       align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 50;
     }
     .header-left {
       display: flex;
@@ -406,19 +446,195 @@ INDEX_HTML = """<!DOCTYPE html>
       background: var(--success);
     }
 
-    /* Main Content Layout */
+    /* ==========================================================================
+       LEFT SIDEBAR: PREVIOUS TASKS / CHATS (HIDDEN UNTIL HOVERED)
+       ========================================================================== */
+    .history-sidebar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: 320px;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      z-index: 1000;
+      transform: translateX(-320px);
+      transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.28s ease;
+      display: flex;
+      flex-direction: column;
+    }
+    .history-sidebar:hover,
+    .history-sidebar:focus-within,
+    .history-sidebar.open {
+      transform: translateX(0);
+      box-shadow: 16px 0 45px rgba(0, 0, 0, 0.75);
+    }
+    /* Hover Tab Indicator that stays visible on the left edge */
+    .history-tab {
+      position: absolute;
+      top: 92px;
+      left: 320px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: none;
+      border-radius: 0 8px 8px 0;
+      padding: 12px 7px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      color: var(--text-muted);
+      box-shadow: 4px 2px 12px rgba(0, 0, 0, 0.35);
+      transition: all 0.2s ease;
+      user-select: none;
+    }
+    .history-sidebar:hover .history-tab {
+      background: var(--surface-elevated);
+      color: var(--primary);
+      border-color: var(--primary);
+    }
+    .tab-icon {
+      font-size: 15px;
+    }
+    .tab-text {
+      writing-mode: vertical-rl;
+      text-orientation: mixed;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1.2px;
+      text-transform: uppercase;
+    }
+    .history-content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: 20px 16px;
+      overflow-y: hidden;
+      width: 100%;
+    }
+    .history-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+    .history-title {
+      font-family: 'Outfit', sans-serif;
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .btn-new-task {
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 5px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      transition: background 0.15s ease;
+    }
+    .btn-new-task:hover {
+      background: var(--primary-hover);
+    }
+    .history-search-box input {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 12px;
+      color: var(--text);
+      font-size: 12px;
+      outline: none;
+      margin-bottom: 12px;
+    }
+    .history-search-box input:focus {
+      border-color: var(--primary);
+    }
+    .history-list {
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding-right: 2px;
+    }
+    .history-item {
+      background: var(--surface-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 10px 12px;
+      cursor: pointer;
+      transition: border-color 0.15s ease, background 0.15s ease;
+      text-align: left;
+    }
+    .history-item:hover, .history-item.active {
+      border-color: var(--primary);
+      background: rgba(37, 99, 235, 0.08);
+    }
+    .history-item.active {
+      border-color: var(--primary);
+      background: rgba(37, 99, 235, 0.12);
+    }
+    .history-item-query {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text);
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      line-height: 1.35;
+      margin-bottom: 6px;
+    }
+    .history-item-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+    .history-status-tag {
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 600;
+      font-size: 10px;
+      text-transform: uppercase;
+    }
+    .history-status-tag.completed {
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--success);
+    }
+    .history-status-tag.waiting {
+      background: rgba(245, 158, 11, 0.15);
+      color: var(--warning);
+    }
+
+    /* ==========================================================================
+       MAIN LAYOUT: WORKBENCH GRID + AUDIT LOG PANE
+       ========================================================================== */
     main {
       flex: 1;
-      max-width: 1400px;
+      max-width: 1440px;
       width: 100%;
       margin: 0 auto;
       padding: 24px 32px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+    .workbench-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 24px;
     }
     @media (max-width: 960px) {
-      main { grid-template-columns: 1fr; }
+      .workbench-grid { grid-template-columns: 1fr; }
     }
 
     .card {
@@ -638,6 +854,7 @@ INDEX_HTML = """<!DOCTYPE html>
       flex: 1;
       display: flex;
       flex-direction: column;
+      min-height: 480px;
     }
     .deliverable-header {
       display: flex;
@@ -899,11 +1116,116 @@ INDEX_HTML = """<!DOCTYPE html>
       color: var(--text-muted);
       line-height: 1.4;
     }
+
+    /* ==========================================================================
+       DEDICATED SEPARATE AUDIT LOG PANE
+       ========================================================================== */
+    .audit-log-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .audit-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .audit-header-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .audit-title {
+      font-family: 'Outfit', sans-serif;
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .audit-subtitle {
+      font-size: 12px;
+      color: var(--text-dim);
+      margin-top: 2px;
+    }
+    .audit-header-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .btn-audit-toggle {
+      background: var(--surface-elevated);
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+    .btn-audit-toggle:hover {
+      background: var(--border);
+      color: var(--text);
+    }
+    .audit-body {
+      transition: all 0.25s ease;
+    }
+    .audit-table-wrapper {
+      max-height: 240px;
+      overflow-y: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--bg);
+    }
+    .audit-table th {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .event-badge {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .event-badge.status { background: rgba(147, 51, 234, 0.15); color: #C084FC; }
+    .event-badge.step { background: rgba(37, 99, 235, 0.15); color: #60A5FA; }
+    .event-badge.completed { background: rgba(16, 185, 129, 0.15); color: #34D399; }
+    .event-badge.approval { background: rgba(245, 158, 11, 0.15); color: #FBBF24; }
+    .event-badge.verify { background: rgba(6, 182, 212, 0.15); color: #22D3EE; }
   </style>
 </head>
 <body>
 
-  <!-- Clean Header -->
+  <!-- Left-side Previous Tasks Drawer (Hidden until hovered) -->
+  <aside class="history-sidebar" id="history-sidebar">
+    <div class="history-tab" id="history-tab" title="Hover to view previous tasks & chats">
+      <span class="tab-icon">🕒</span>
+      <span class="tab-text">History</span>
+    </div>
+
+    <div class="history-content">
+      <div class="history-header">
+        <div class="history-title">Previous Tasks</div>
+        <button type="button" class="btn-new-task" onclick="startNewTask()">+ New Task</button>
+      </div>
+
+      <div class="history-search-box">
+        <input type="text" id="history-search" placeholder="Search previous chats..." oninput="filterHistory(this.value)">
+      </div>
+
+      <div class="history-list" id="history-list">
+        <!-- Dynamically populated past tasks -->
+      </div>
+    </div>
+  </aside>
+
+  <!-- Clean Top Header -->
   <header>
     <div class="header-left">
       <div class="header-title">Sovereign Engineering Workbench</div>
@@ -922,95 +1244,148 @@ INDEX_HTML = """<!DOCTYPE html>
 
   <!-- Main Work Area -->
   <main>
-    <!-- Left Column: Input and File Upload -->
-    <div class="card">
-      <div class="card-heading">Task Configuration</div>
-      <div class="card-subheading">Enter an engineering instruction and optionally attach files (CSV sensor data, inspection photos, or PDF specifications).</div>
+    <!-- Top Row: Workbench Grid (Task Config + Single Deliverable) -->
+    <div class="workbench-grid">
+      <!-- Left Column: Input and File Upload -->
+      <div class="card">
+        <div class="card-heading">Task Configuration</div>
+        <div class="card-subheading">Enter an engineering instruction and optionally attach files (CSV sensor data, inspection photos, or PDF specifications).</div>
 
-      <form id="task-form" onsubmit="handleFormSubmit(event)">
-        <label for="instruction">Instruction</label>
-        <textarea id="instruction" placeholder="Describe your engineering or analysis task...&#10;e.g., 'Analyze this vibration sensor dataset and calculate statistics'&#10;e.g., 'Check maintenance procedure for pump PX-417'&#10;e.g., 'Inspect the casing image for surface defects and observations'"></textarea>
+        <form id="task-form" onsubmit="handleFormSubmit(event)">
+          <label for="instruction">Instruction</label>
+          <textarea id="instruction" placeholder="Describe your engineering or analysis task...&#10;e.g., 'Analyze this vibration sensor dataset and calculate statistics'&#10;e.g., 'Check maintenance procedure for pump PX-417'&#10;e.g., 'Inspect the casing image for surface defects and observations'"></textarea>
 
-        <!-- Native Explorer File Picker Dropzone -->
-        <label>Attachment</label>
-        <input type="file" id="file-picker" style="display:none" onchange="handleFileSelected(event)">
-        <div class="file-dropzone" id="file-dropzone" onclick="document.getElementById('file-picker').click()">
-          <div style="font-size: 24px;">📁</div>
-          <div style="font-weight: 600; font-size: 14px; margin-top: 4px;">Choose File from Computer</div>
-          <p>Drag & drop or click to select CSV, PDF, PNG, JPG, or XLSX</p>
-          <div class="btn-browse">Browse Files</div>
-        </div>
+          <!-- Native Explorer File Picker Dropzone -->
+          <label>Attachment</label>
+          <input type="file" id="file-picker" style="display:none" onchange="handleFileSelected(event)">
+          <div class="file-dropzone" id="file-dropzone" onclick="document.getElementById('file-picker').click()">
+            <div style="font-size: 24px;">📁</div>
+            <div style="font-weight: 600; font-size: 14px; margin-top: 4px;">Choose File from Computer</div>
+            <p>Drag & drop or click to select CSV, PDF, PNG, JPG, or XLSX</p>
+            <div class="btn-browse">Browse Files</div>
+          </div>
 
-        <!-- Selected File Banner -->
-        <div class="attached-file-card" id="attached-file-card">
-          <div class="attached-file-info">
-            <span style="font-size: 18px;">📄</span>
-            <div>
-              <div id="attached-file-name" style="color: var(--text);">filename.csv</div>
-              <div id="attached-file-size" style="font-size: 11px; color: var(--text-dim);">0 KB</div>
+          <!-- Selected File Banner -->
+          <div class="attached-file-card" id="attached-file-card">
+            <div class="attached-file-info">
+              <span style="font-size: 18px;">📄</span>
+              <div>
+                <div id="attached-file-name" style="color: var(--text);">filename.csv</div>
+                <div id="attached-file-size" style="font-size: 11px; color: var(--text-dim);">0 KB</div>
+              </div>
+            </div>
+            <button type="button" class="btn-remove-file" onclick="removeAttachedFile()" title="Remove file">✕</button>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="sensitivity">Data Sensitivity</label>
+              <select id="sensitivity">
+                <option value="INTERNAL">Internal (Standard)</option>
+                <option value="CONFIDENTIAL">Confidential (Proprietary / SOP)</option>
+                <option value="RESTRICTED">Restricted (Air-Gapped)</option>
+              </select>
             </div>
           </div>
-          <button type="button" class="btn-remove-file" onclick="removeAttachedFile()" title="Remove file">✕</button>
-        </div>
 
-        <div class="form-row">
-          <div class="form-group">
-            <label for="sensitivity">Data Sensitivity</label>
-            <select id="sensitivity">
-              <option value="INTERNAL">Internal (Standard)</option>
-              <option value="CONFIDENTIAL">Confidential (Proprietary / SOP)</option>
-              <option value="RESTRICTED">Restricted (Air-Gapped)</option>
-            </select>
+          <button type="submit" class="btn-run" id="btn-run">
+            <span>▶</span> Run Workbench Task
+          </button>
+        </form>
+
+        <!-- Step Timeline -->
+        <div class="timeline-title">Workflow Progress</div>
+        <div class="step-list">
+          <div class="step-item" id="step-understand">
+            <div class="step-dot"></div> 1. Task Understanding
+          </div>
+          <div class="step-item" id="step-policy">
+            <div class="step-dot"></div> 2. Safety Policy & Risk Assessment
+          </div>
+          <div class="step-item" id="step-execute">
+            <div class="step-dot"></div> 3. Agent Execution (Local Sandbox / GPU)
+          </div>
+          <div class="step-item" id="step-verify">
+            <div class="step-dot"></div> 4. Deterministic Verification
+          </div>
+          <div class="step-item" id="step-deliver">
+            <div class="step-dot"></div> 5. Output Deliverable Delivery
           </div>
         </div>
+      </div>
 
-        <button type="submit" class="btn-run" id="btn-run">
-          <span>▶</span> Run Workbench Task
-        </button>
-      </form>
+      <!-- Right Column: Single Deliverable Container -->
+      <div class="card deliverable-container">
+        <div class="deliverable-header">
+          <div class="deliverable-title">Task Deliverable</div>
+          <div class="deliverable-badge" id="deliverable-badge">Ready</div>
+        </div>
 
-      <!-- Step Timeline -->
-      <div class="timeline-title">Workflow Progress</div>
-      <div class="step-list">
-        <div class="step-item" id="step-understand">
-          <div class="step-dot"></div> 1. Task Understanding
-        </div>
-        <div class="step-item" id="step-policy">
-          <div class="step-dot"></div> 2. Safety Policy & Risk Assessment
-        </div>
-        <div class="step-item" id="step-execute">
-          <div class="step-dot"></div> 3. Agent Execution (Local Sandbox / GPU)
-        </div>
-        <div class="step-item" id="step-verify">
-          <div class="step-dot"></div> 4. Deterministic Verification
-        </div>
-        <div class="step-item" id="step-deliver">
-          <div class="step-dot"></div> 5. Output Deliverable Delivery
+        <!-- Deliverable Content Body -->
+        <div id="deliverable-body">
+          <div class="empty-state">
+            <div class="empty-state-icon">📋</div>
+            <div class="empty-state-text">Your completed deliverables, calculation traces, inspection observations, and verified reports will appear here.</div>
+          </div>
         </div>
       </div>
     </div>
 
-    <!-- Right Column: Single Deliverable Container -->
-    <div class="card deliverable-container">
-      <div class="deliverable-header">
-        <div class="deliverable-title">Task Deliverable</div>
-        <div class="deliverable-badge" id="deliverable-badge">Ready</div>
-      </div>
-
-      <!-- Deliverable Content Body -->
-      <div id="deliverable-body">
-        <div class="empty-state">
-          <div class="empty-state-icon">📋</div>
-          <div class="empty-state-text">Your completed deliverables, calculation traces, inspection observations, and verified reports will appear here.</div>
+    <!-- Bottom Row: Dedicated Separate Audit Log Pane -->
+    <section class="card audit-log-card">
+      <div class="audit-header">
+        <div class="audit-header-left">
+          <span style="font-size: 20px;">🛡️</span>
+          <div>
+            <div class="audit-title">System & Security Audit Log</div>
+            <div class="audit-subtitle">Append-only chronological audit trail with zero-egress cryptographic verification</div>
+          </div>
+        </div>
+        <div class="audit-header-right">
+          <span class="pill" id="audit-active-task-pill" style="display:none;">Task: -</span>
+          <span class="pill" id="audit-count-badge">0 Recorded Events</span>
+          <button type="button" class="btn-audit-toggle" onclick="toggleAuditLog()" id="btn-toggle-audit">Collapse</button>
         </div>
       </div>
-    </div>
+
+      <div class="audit-body" id="audit-log-body">
+        <div class="audit-table-wrapper">
+          <table class="styled-table audit-table">
+            <thead>
+              <tr>
+                <th style="width: 140px;">Timestamp</th>
+                <th style="width: 170px;">Event Type</th>
+                <th style="width: 130px;">Specialist</th>
+                <th>Forensic Message & Operations</th>
+                <th style="width: 140px; text-align: center;">Zero-Egress</th>
+              </tr>
+            </thead>
+            <tbody id="audit-table-rows">
+              <tr>
+                <td colspan="5" style="text-align: center; color: var(--text-dim); padding: 24px;">
+                  Select a past task or run a new workbench task to view its detailed forensic audit trail.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
   </main>
 
   <script>
     let uploadedFilePath = null;
     let currentTaskId = null;
     let currentPlanHash = null;
+    let allHistoryTasks = [];
+    let isAuditCollapsed = false;
+
+    // Initialize UI
+    window.addEventListener('DOMContentLoaded', () => {
+      updateGpuStatus();
+      loadTasksHistory();
+      loadGlobalAuditLogs();
+    });
 
     // Load GPU status
     async function updateGpuStatus() {
@@ -1022,9 +1397,221 @@ INDEX_HTML = """<!DOCTYPE html>
         }
       } catch (e) {}
     }
-    updateGpuStatus();
 
-    // File Drag & Drop
+    // ==========================================================================
+    // HISTORY SIDEBAR: LOAD, FILTER, SELECT
+    // ==========================================================================
+    async function loadTasksHistory() {
+      try {
+        const res = await fetch('/api/v1/tasks');
+        allHistoryTasks = await res.json();
+        renderHistoryList(allHistoryTasks);
+      } catch (e) {
+        console.error('Failed to load history:', e);
+      }
+    }
+
+    function renderHistoryList(tasks) {
+      const container = document.getElementById('history-list');
+      if (!tasks || tasks.length === 0) {
+        container.innerHTML = `
+          <div style="text-align: center; color: var(--text-dim); font-size: 13px; padding: 20px;">
+            No past tasks recorded yet.
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = tasks.map(t => {
+        const isActive = t.task_id === currentTaskId;
+        const timeStr = formatRelativeTime(t.created_at);
+        const statusClass = t.status === 'COMPLETED' ? 'completed' : (t.status === 'WAITING_APPROVAL' ? 'waiting' : '');
+        return `
+          <div class="history-item ${isActive ? 'active' : ''}" onclick="selectHistoryTask('${t.task_id}')">
+            <div class="history-item-query" title="${escapeHtml(t.instruction)}">${escapeHtml(t.instruction || 'Untitled Task')}</div>
+            <div class="history-item-meta">
+              <span>${timeStr}</span>
+              <span class="history-status-tag ${statusClass}">${t.status}</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function filterHistory(query) {
+      if (!query.trim()) {
+        renderHistoryList(allHistoryTasks);
+        return;
+      }
+      const q = query.toLowerCase();
+      const filtered = allHistoryTasks.filter(t => (t.instruction || '').toLowerCase().includes(q));
+      renderHistoryList(filtered);
+    }
+
+    async function selectHistoryTask(taskId) {
+      currentTaskId = taskId;
+      renderHistoryList(allHistoryTasks);
+
+      try {
+        const res = await fetch(`/api/v1/tasks/${taskId}`);
+        if (!res.ok) throw new Error('Task not found');
+        const task = await res.json();
+
+        // Populate instruction
+        document.getElementById('instruction').value = task.user_query || '';
+
+        // Populate attached file if present
+        const ctx = task.context || {};
+        if (ctx.file_path) {
+          uploadedFilePath = ctx.file_path;
+          const fileName = uploadedFilePath.split(/[\\\\/]/).pop();
+          document.getElementById('attached-file-name').innerText = fileName;
+          document.getElementById('attached-file-size').innerText = 'Attached from history';
+          document.getElementById('attached-file-card').style.display = 'flex';
+          document.getElementById('file-dropzone').style.display = 'none';
+        } else {
+          removeAttachedFile();
+        }
+
+        // Render deliverable
+        if (task.status === 'COMPLETED' && ctx.final_result) {
+          updateStepProgress('deliver');
+          document.getElementById('deliverable-badge').innerText = 'Completed & Verified';
+          document.getElementById('deliverable-badge').className = 'deliverable-badge completed';
+          renderCompletedDeliverable({ final_result: ctx.final_result, status: task.status });
+        } else if (task.status === 'WAITING_APPROVAL') {
+          updateStepProgress('policy');
+          document.getElementById('deliverable-badge').innerText = 'Approval Required';
+          document.getElementById('deliverable-badge').className = 'deliverable-badge approval';
+          handleTaskResult({
+            task_id: taskId,
+            status: task.status,
+            approval_request: ctx.approval_request
+          });
+        } else {
+          updateStepProgress('deliver');
+          document.getElementById('deliverable-badge').innerText = task.status;
+          renderCompletedDeliverable({ final_result: ctx.final_result || {}, status: task.status });
+        }
+
+        // Render audit events for this specific task
+        renderAuditEvents(task.events || [], taskId);
+
+      } catch (err) {
+        alert('Failed to load past task: ' + err.message);
+      }
+    }
+
+    function startNewTask() {
+      currentTaskId = null;
+      currentPlanHash = null;
+      document.getElementById('instruction').value = '';
+      removeAttachedFile();
+      document.getElementById('deliverable-badge').innerText = 'Ready';
+      document.getElementById('deliverable-badge').className = 'deliverable-badge';
+      document.getElementById('deliverable-body').innerHTML = `
+        <div class="empty-state">
+          <div class="empty-state-icon">📋</div>
+          <div class="empty-state-text">Your completed deliverables, calculation traces, inspection observations, and verified reports will appear here.</div>
+        </div>
+      `;
+      updateStepProgress(null);
+      renderHistoryList(allHistoryTasks);
+      loadGlobalAuditLogs();
+    }
+
+    function formatRelativeTime(isoStr) {
+      if (!isoStr) return '';
+      const date = new Date(isoStr);
+      const diffMs = Date.now() - date.getTime();
+      const diffMin = Math.floor(diffMs / 60000);
+      if (diffMin < 1) return 'Just now';
+      if (diffMin < 60) return `${diffMin}m ago`;
+      const diffHour = Math.floor(diffMin / 60);
+      if (diffHour < 24) return `${diffHour}h ago`;
+      return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    }
+
+    // ==========================================================================
+    // DEDICATED AUDIT LOG PANE LOGIC
+    // ==========================================================================
+    async function loadGlobalAuditLogs() {
+      try {
+        const res = await fetch('/api/v1/audit/logs?limit=30');
+        const events = await res.json();
+        renderAuditEvents(events, null);
+      } catch (e) {}
+    }
+
+    function renderAuditEvents(events, taskId) {
+      const tbody = document.getElementById('audit-table-rows');
+      const countBadge = document.getElementById('audit-count-badge');
+      const taskPill = document.getElementById('audit-active-task-pill');
+
+      if (taskId) {
+        taskPill.style.display = 'inline-flex';
+        taskPill.innerText = `Task: ${taskId}`;
+      } else {
+        taskPill.style.display = 'none';
+      }
+
+      countBadge.innerText = `${(events || []).length} Recorded Events`;
+
+      if (!events || events.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="5" style="text-align: center; color: var(--text-dim); padding: 24px;">
+              No audit events recorded for this session.
+            </td>
+          </tr>
+        `;
+        return;
+      }
+
+      tbody.innerHTML = events.map(e => {
+        const time = e.timestamp ? new Date(e.timestamp).toLocaleTimeString() : '-';
+        const type = (e.event_type || 'EVENT').toUpperCase();
+        let badgeClass = 'step';
+        if (type.includes('APPROVAL')) badgeClass = 'approval';
+        else if (type.includes('COMPLETED')) badgeClass = 'completed';
+        else if (type.includes('STATUS')) badgeClass = 'status';
+        else if (type.includes('VERIF')) badgeClass = 'verify';
+
+        const agent = e.agent_id || 'system';
+        const msg = e.message || (e.payload && e.payload.message) || JSON.stringify(e.payload || {});
+
+        return `
+          <tr>
+            <td style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text-dim);">${time}</td>
+            <td><span class="event-badge ${badgeClass}">${escapeHtml(type)}</span></td>
+            <td><strong style="color: var(--text);">${escapeHtml(agent)}</strong></td>
+            <td>${escapeHtml(msg)}</td>
+            <td style="text-align: center;">
+              <span style="display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--success); font-family: 'JetBrains Mono', monospace;">
+                <span class="dot-green"></span> 127.0.0.1
+              </span>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function toggleAuditLog() {
+      const body = document.getElementById('audit-log-body');
+      const btn = document.getElementById('btn-toggle-audit');
+      isAuditCollapsed = !isAuditCollapsed;
+      if (isAuditCollapsed) {
+        body.style.display = 'none';
+        btn.innerText = 'Expand';
+      } else {
+        body.style.display = 'block';
+        btn.innerText = 'Collapse';
+      }
+    }
+
+    // ==========================================================================
+    // FILE DRAG & DROP AND SELECTION
+    // ==========================================================================
     const dropzone = document.getElementById('file-dropzone');
     dropzone.addEventListener('dragover', (e) => {
       e.preventDefault();
@@ -1085,13 +1672,15 @@ INDEX_HTML = """<!DOCTYPE html>
         if (s === activeStep) {
           el.className = 'step-item active';
           found = true;
-        } else if (!found) {
+        } else if (!found && activeStep !== null) {
           el.className = 'step-item completed';
         }
       });
     }
 
-    // Submit Task
+    // ==========================================================================
+    // SUBMIT TASK & EXECUTION
+    // ==========================================================================
     async function handleFormSubmit(e) {
       e.preventDefault();
       const instruction = document.getElementById('instruction').value.trim();
@@ -1134,6 +1723,10 @@ INDEX_HTML = """<!DOCTYPE html>
 
         const data = await res.json();
         handleTaskResult(data);
+        if (data.events) {
+          renderAuditEvents(data.events, data.task_id);
+        }
+        loadTasksHistory();
       } catch (err) {
         document.getElementById('deliverable-body').innerHTML = `
           <div class="empty-state">
@@ -1206,6 +1799,10 @@ INDEX_HTML = """<!DOCTYPE html>
         });
         const data = await res.json();
         handleTaskResult(data);
+        if (data.events) {
+          renderAuditEvents(data.events, data.task_id);
+        }
+        loadTasksHistory();
       } catch (err) {
         alert('Failed to authorize task: ' + err.message);
       }
