@@ -1,4 +1,4 @@
-﻿"""Local BM25 lexical index for Phase 8 RAG - exact identifier and keyword search."""
+"""Local BM25 lexical index for Phase 8 RAG - exact identifier and keyword search."""
 
 import json
 import logging
@@ -12,17 +12,22 @@ from backend.app.rag.schemas import KnowledgeChunk, RetrievalResult
 logger = logging.getLogger("app.rag.lexical_index")
 
 try:
-    from rank_bm25 import BM25Okapi
+    from rank_bm25 import BM25Okapi, BM25Plus
     BM25_AVAILABLE = True
 except ImportError:
     BM25_AVAILABLE = False
     BM25Okapi = None
+    BM25Plus = None
 
 
 def _tokenize(text: str) -> List[str]:
-    """Tokenize preserving identifiers, numbers, and technical terms."""
-    # Preserve alphanumeric runs including hyphens/underscores (part numbers, IDs)
-    tokens = re.findall(r"[A-Za-z0-9](?:[A-Za-z0-9\-_\.]*[A-Za-z0-9])?", text.lower())
+    """Tokenize preserving identifiers, numbers, and technical terms, plus delimiter subparts."""
+    raw_tokens = re.findall(r"[A-Za-z0-9](?:[A-Za-z0-9\-_\.]*[A-Za-z0-9])?", text.lower())
+    tokens: List[str] = []
+    for t in raw_tokens:
+        tokens.append(t)
+        subparts = [p for p in re.split(r"[\-_\.]+", t) if p and p != t]
+        tokens.extend(subparts)
     return [t for t in tokens if len(t) > 0]
 
 
@@ -47,7 +52,10 @@ class LexicalIndex:
     def _rebuild(self) -> None:
         """Rebuild the BM25 index from the current corpus."""
         if self._corpus:
-            self._bm25 = BM25Okapi(self._corpus)
+            if BM25Plus is not None:
+                self._bm25 = BM25Plus(self._corpus)
+            else:
+                self._bm25 = BM25Okapi(self._corpus)
         else:
             self._bm25 = None
 
@@ -89,11 +97,21 @@ class LexicalIndex:
             return []
 
         scores = self._bm25.get_scores(query_tokens)
+        query_set = set(query_tokens)
+
+        # Build scored list, ensuring documents with actual token matches get non-negative scores
+        adjusted_scores: List[Tuple[int, float]] = []
+        for idx, score in enumerate(scores):
+            doc_tokens = set(self._corpus[idx])
+            matching = query_set & doc_tokens
+            if matching:
+                effective_score = max(float(score), float(len(matching)))
+                adjusted_scores.append((idx, effective_score))
+            elif score > 0:
+                adjusted_scores.append((idx, float(score)))
 
         # Sort by score descending
-        ranked = sorted(
-            enumerate(scores), key=lambda x: x[1], reverse=True
-        )
+        ranked = sorted(adjusted_scores, key=lambda x: x[1], reverse=True)
 
         results: List[RetrievalResult] = []
         rank = 1

@@ -1,4 +1,4 @@
-﻿"""Structure-aware document chunker for Phase 8 RAG."""
+"""Structure-aware document chunker for Phase 8 RAG."""
 
 import re
 import uuid
@@ -13,7 +13,11 @@ MIN_CHUNK_CHARS = 50
 MAX_CHUNKS_PER_DOC = 500
 
 
-def _split_by_structure(text: str) -> List[str]:
+def _split_by_structure(
+    text: str,
+    max_chunk_chars: int = MAX_CHUNK_CHARS,
+    min_chunk_chars: int = MIN_CHUNK_CHARS,
+) -> List[str]:
     """
     Split text preferring heading/paragraph/section boundaries.
     Avoids splitting in the middle of identifiers or measurements.
@@ -28,18 +32,26 @@ def _split_by_structure(text: str) -> List[str]:
         if not para:
             continue
 
+        # Treat section/paragraph headings as structural break points
+        is_section_header = bool(
+            re.match(r"^(?:#+|section\b|para\b|part\b|chapter\b|[0-9]+[\.\)])", para, re.I)
+        )
+        if is_section_header and buffer:
+            chunks.append(buffer)
+            buffer = ""
+
         # If adding this paragraph keeps us under the limit, accumulate
-        if len(buffer) + len(para) + 2 <= MAX_CHUNK_CHARS:
+        if len(buffer) + len(para) + 2 <= max_chunk_chars:
             buffer = (buffer + "\n\n" + para).strip() if buffer else para
         else:
             if buffer:
                 chunks.append(buffer)
             # If paragraph itself is oversized, split by sentences
-            if len(para) > MAX_CHUNK_CHARS:
+            if len(para) > max_chunk_chars:
                 sentences = re.split(r"(?<=[.!?])\s+", para)
                 sbuf = ""
                 for sent in sentences:
-                    if len(sbuf) + len(sent) + 1 <= MAX_CHUNK_CHARS:
+                    if len(sbuf) + len(sent) + 1 <= max_chunk_chars:
                         sbuf = (sbuf + " " + sent).strip() if sbuf else sent
                     else:
                         if sbuf:
@@ -54,7 +66,11 @@ def _split_by_structure(text: str) -> List[str]:
     if buffer:
         chunks.append(buffer)
 
-    return [c for c in chunks if len(c) >= MIN_CHUNK_CHARS]
+    filtered = [c for c in chunks if len(c) >= min_chunk_chars]
+    if not filtered and chunks:
+        # Never silently drop entire non-empty content
+        return [c for c in chunks if c.strip()]
+    return filtered
 
 
 class DocumentChunker:
@@ -93,7 +109,11 @@ class DocumentChunker:
         if not text or not text.strip():
             return []
 
-        raw_chunks = _split_by_structure(text)
+        raw_chunks = _split_by_structure(
+            text,
+            max_chunk_chars=self.max_chunk_chars,
+            min_chunk_chars=self.min_chunk_chars,
+        )
 
         if len(raw_chunks) > self.max_chunks_per_doc:
             raise ResourceLimitExceededError(

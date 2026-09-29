@@ -158,6 +158,12 @@ class ModelRegistry:
             return []
         return list(self._profiles[target_prof_name].models.values())
 
+    def list_models(self, profile: Optional[str] = None) -> List[str]:
+        """List model IDs and names in the specified or active profile."""
+        models = self.list(profile=profile)
+        names = {m.id for m in models} | {m.model_name for m in models}
+        return list(names)
+
     def list_active_models(self) -> List[ModelDefinition]:
         """List all enabled models in the active profile."""
         active_prof = self.get_active_profile()

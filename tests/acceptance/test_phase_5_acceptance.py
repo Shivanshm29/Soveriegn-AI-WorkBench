@@ -308,9 +308,7 @@ def test_acceptance_17_no_infinite_approval_loops(tmp_path):
 
 
 def test_acceptance_18_no_phase_6_functionality():
-    """Acceptance 18: Verify no Phase 7+ features (RAG, sandbox execution) implemented."""
-    with pytest.raises(ImportError):
-        import backend.app.rag  # type: ignore
+    """Acceptance 18: Verify no Phase 9+ features (sandbox execution) implemented."""
     with pytest.raises(ImportError):
         import backend.app.sandbox  # type: ignore
 

@@ -153,14 +153,24 @@ class WorkbenchOrchestrator:
         task_id: Optional[str] = None,
         data_sensitivity: str = "INTERNAL",
         metadata: Optional[Dict[str, Any]] = None,
+        initial_context: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
     ) -> OrchestrationState:
         """Execute a user task to completion or approval pause through the compiled state graph."""
+        combined_metadata = dict(metadata or {})
+        if initial_context:
+            combined_metadata.update(initial_context)
+        if kwargs:
+            combined_metadata.update(kwargs)
+
         initial_state = create_initial_orchestration_state(
             task_id=task_id,
             user_request=user_request,
             data_sensitivity=data_sensitivity,
-            metadata=metadata,
+            metadata=combined_metadata,
         )
+        if initial_context:
+            initial_state.update(initial_context)
         final_state = self.graph.invoke(initial_state)
         return final_state
 

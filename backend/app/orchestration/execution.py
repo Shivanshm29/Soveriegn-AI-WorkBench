@@ -294,6 +294,7 @@ class AgentExecutor:
 
                     output = {
                         "vision_result": vision_result.model_dump(),
+                        "document_analysis": vision_result.model_dump(),
                         "step_id": step.step_id,
                         "agent_id": agent_id,
                     }

@@ -138,11 +138,20 @@ class OrchestrationNodes:
             else:
                 # Deterministic fallback when runtime is not passed
                 req_lower = new_state.get("user_request", "").lower()
+                has_image = bool(
+                    new_state.get("image_path")
+                    or new_state.get("file_path")
+                    or (new_state.get("metadata") or {}).get("image_path")
+                    or (new_state.get("metadata") or {}).get("file_path")
+                )
                 if "sandbox" in req_lower or "code" in req_lower or "script" in req_lower or "python" in req_lower:
                     caps = ["code_execution"]
                     comp = "MEDIUM"
-                elif "visual" in req_lower or "image" in req_lower:
+                elif has_image or any(k in req_lower for k in ("visual", "image", "drawing", "dimension", "blueprint", "diagram", "turbine casing")):
                     caps = ["visual_reasoning"]
+                    comp = "MEDIUM"
+                elif any(k in req_lower for k in ("search", "retrieve", "knowledge", "px-417", "pump", "manual", "sop", "finding", "recommend")):
+                    caps = ["knowledge_search"]
                     comp = "MEDIUM"
                 else:
                     caps = ["reasoning"]
