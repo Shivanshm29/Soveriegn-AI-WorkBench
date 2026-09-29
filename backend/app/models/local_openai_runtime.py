@@ -122,8 +122,24 @@ class LocalOpenAIRuntime(ModelRuntime):
             "Authorization": f"Bearer {self.api_key}",
         }
 
+        target_model = request.model_id
+        alias_map = {
+            "Qwen/Qwen3-4B": "qwen2.5:3b",
+            "qwen3:4b": "qwen3:4b",
+            "Qwen/Qwen3-VL-4B-Instruct": "qwen3-vl:4b",
+            "Qwen/Qwen3-VL-8B-Instruct": "qwen3-vl:8b",
+            "Qwen/Qwen2.5-Coder-3B-Instruct": "qwen2.5-coder:3b",
+            "Qwen/Qwen2.5-Coder-7B-Instruct": "qwen2.5-coder:3b",
+            "Qwen/Qwen3-Coder": "qwen3-coder:latest",
+            "qwen3-small": "qwen2.5:3b",
+            "qwen3-vl-small": "qwen3-vl:4b",
+            "qwen-coder-small": "qwen2.5-coder:3b",
+        }
+        if target_model in alias_map:
+            target_model = alias_map[target_model]
+
         payload: Dict[str, Any] = {
-            "model": request.model_id,
+            "model": target_model,
             "messages": self._format_messages(request.messages),
             "temperature": request.temperature,
         }
@@ -135,13 +151,14 @@ class LocalOpenAIRuntime(ModelRuntime):
         if request.tool_choice is not None:
             payload["tool_choice"] = request.tool_choice
         if request.response_format is not None:
-            payload["response_format"] = request.response_format
+            model_lower = (target_model or "").lower()
+            if "11434" in self.base_url and "qwen3" in model_lower:
+                pass
+            else:
+                payload["response_format"] = request.response_format
 
         # Disable Qwen3 "thinking" mode to prevent empty-output errors.
-        # Qwen3 in thinking mode may exhaust thinking tokens without producing
-        # output text, causing the server to return:
-        # "model output must contain either output text or tool calls, these cannot both be empty"
-        model_lower = (request.model_id or "").lower()
+        model_lower = (target_model or "").lower()
         if "qwen3" in model_lower or "qwen2.5" in model_lower:
             payload["chat_template_kwargs"] = {"enable_thinking": False}
 
@@ -257,10 +274,23 @@ class LocalOpenAIRuntime(ModelRuntime):
             try:
                 json.loads(content)
             except Exception as e:
-                raise ModelResponseError(
-                    f"Model returned invalid JSON for structured output request: {content[:200]}",
-                    details={"content": content, "error": str(e)},
-                ) from e
+                import re
+                m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", content, re.DOTALL)
+                if not m:
+                    m = re.search(r"(\{.*\})", content, re.DOTALL)
+                if m:
+                    try:
+                        json.loads(m.group(1))
+                    except Exception:
+                        raise ModelResponseError(
+                            f"Model returned invalid JSON for structured output request: {content[:200]}",
+                            details={"content": content, "error": str(e)},
+                        ) from e
+                else:
+                    raise ModelResponseError(
+                        f"Model returned invalid JSON for structured output request: {content[:200]}",
+                        details={"content": content, "error": str(e)},
+                    ) from e
 
         # Final guard: if both content and tool_calls are absent, use empty string
         # so downstream consumers receive a valid (if empty) response instead of crashing.

@@ -2,6 +2,7 @@
 
 import os
 import openpyxl
+from PIL import Image, ImageDraw
 from typing import Dict, Any, List
 
 SAMPLE_CSV_CONTENT = """equipment_id,timestamp,vibration_mms,temperature_c,pressure_bar,status
@@ -108,3 +109,33 @@ def create_sample_xlsx_file(path: str) -> str:
     wb.save(path)
     wb.close()
     return path
+
+
+def create_industrial_equipment_photo(path: str, width: int = 800, height: int = 600) -> str:
+    """Create a sample industrial equipment inspection photo / diagram."""
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    img = Image.new("RGB", (width, height), color=(240, 243, 246))
+    draw = ImageDraw.Draw(img)
+
+    # Frame and Header
+    draw.rectangle([20, 20, width - 20, height - 20], outline=(40, 50, 60), width=3)
+    draw.rectangle([20, 20, width - 20, 80], fill=(30, 41, 59))
+    draw.text((40, 38), "INDUSTRIAL INSPECTION REPORT: TURBINE-01 / CASING", fill=(255, 255, 255))
+
+    # Casing / Flange geometry
+    draw.rectangle([100, 140, width - 100, height - 120], outline=(70, 80, 95), width=4, fill=(215, 225, 235))
+    draw.ellipse([250, 200, 550, 480], outline=(30, 40, 50), width=3, fill=(180, 195, 210))
+    draw.ellipse([340, 280, 460, 400], outline=(15, 23, 42), width=2, fill=(130, 145, 160))
+
+    # Inspection anomaly indicator
+    draw.rectangle([430, 230, 520, 310], outline=(220, 38, 38), width=3)
+    draw.text((435, 210), "[DEFECT-IND-01]", fill=(185, 28, 28))
+    draw.text((435, 320), "Candidate surface pitting", fill=(185, 28, 28))
+
+    # Measurement Callouts
+    draw.text((50, 100), "Nominal Diameter: 250mm +/- 0.5mm", fill=(30, 40, 50))
+    draw.text((50, height - 80), "STATUS: NON-CONFORMANCE CANDIDATE DETECTED | NDT REQUIRED", fill=(185, 28, 28))
+
+    img.save(path)
+    return path
+

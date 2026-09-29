@@ -131,14 +131,20 @@ class OrchestrationNodes:
                     complexity="MEDIUM" if "code_execution" in req_caps else "LOW",
                     output_type="analysis",
                 )
-            elif self.model_runtime is not None:
-                understanding = understand_task(
-                    new_state["user_request"],
-                    self.model_runtime,
-                    self.model_registry,
-                )
-            else:
-                # Deterministic fallback when runtime is not passed
+            understanding = None
+            if self.model_runtime is not None:
+                try:
+                    understanding = understand_task(
+                        new_state["user_request"],
+                        self.model_runtime,
+                        self.model_registry,
+                    )
+                except Exception as ex:
+                    logger.warning("Dynamic model understanding failed (%s); falling back to deterministic parser.", ex)
+                    understanding = None
+
+            if understanding is None:
+                # Deterministic fallback when runtime is not passed or model call fails
                 req_lower = new_state.get("user_request", "").lower()
                 has_image = bool(
                     new_state.get("image_path")
