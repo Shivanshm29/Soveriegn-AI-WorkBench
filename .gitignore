@@ -20,6 +20,8 @@ data/tasks/
 data/audit/
 data/cache/
 data/state/
+data/uploads/
+data/artifacts/
 *.log
 
 # IDE & OS files

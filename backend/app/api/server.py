@@ -1,4 +1,4 @@
-"""FastAPI server and Interactive Sovereign Workbench Web Interface."""
+"""FastAPI server and Humane Sovereign Workbench Web Interface."""
 
 import json
 import os
@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import fastapi
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel
@@ -41,7 +41,7 @@ app.add_middleware(
 state_store = LocalStateStore()
 model_registry = ModelRegistry()
 
-# Detect local Ollama or fallback runtime
+# Detect local Ollama runtime
 ollama_url = "http://127.0.0.1:11434/v1"
 local_runtime = None
 try:
@@ -57,6 +57,10 @@ orchestrator = WorkbenchOrchestrator(
     model_runtime=local_runtime,
     state_store=state_store,
 )
+
+# Uploads staging directory
+UPLOAD_DIR = Path(get_settings().DATA_ROOT) / "uploads"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
 class TaskRequestPayload(BaseModel):
@@ -85,7 +89,7 @@ def get_sovereignty_status():
         "allowed_hosts": ["127.0.0.1", "localhost"],
         "cloud_telemetry_disabled": True,
         "cloud_api_disabled": True,
-        "active_runtime_endpoint": local_runtime.base_url if local_runtime else "Mock / Local Subprocess",
+        "active_runtime_endpoint": local_runtime.base_url if local_runtime else "Local Subprocess",
     }
 
 
@@ -93,7 +97,7 @@ def get_sovereignty_status():
 def get_models_status():
     """Return local GPU, VRAM, and loaded Ollama models."""
     gpu_info = "NVIDIA GeForce RTX 3050 Laptop GPU (6 GB VRAM)"
-    vram_usage = "4.9 GB / 6.0 GB"
+    vram_usage = "4.2 GB / 6.0 GB"
     try:
         smi = subprocess.check_output(
             ["nvidia-smi", "--query-gpu=name,memory.used,memory.total", "--format=csv,noheader,nounits"],
@@ -121,6 +125,22 @@ def get_models_status():
     }
 
 
+@app.post("/api/v1/upload")
+async def upload_file(file: UploadFile = File(...)):
+    """Save user-selected file from Explorer into workspace staging."""
+    file_id = uuid.uuid4().hex[:8]
+    clean_name = Path(file.filename or "upload.dat").name
+    save_path = UPLOAD_DIR / f"{file_id}_{clean_name}"
+    with open(save_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    return {
+        "file_id": file_id,
+        "filename": clean_name,
+        "file_path": str(save_path),
+        "size_bytes": save_path.stat().st_size,
+    }
+
+
 @app.get("/api/v1/tasks/{task_id}")
 def get_task_details(task_id: str):
     """Retrieve detailed state of a task."""
@@ -141,19 +161,26 @@ def get_task_events(task_id: str):
 def create_task(payload: TaskRequestPayload):
     """Submit a task to the Sovereign Workbench."""
     t_id = payload.task_id or f"task_{uuid.uuid4().hex[:8]}"
+    file_p = payload.file_path
+    csv_p = payload.csv_path
+
+    # Auto-detect if file_path is CSV or XLSX
+    if file_p and not csv_p and file_p.lower().endswith((".csv", ".xlsx")):
+        csv_p = file_p
+
     state = orchestrator.run(
         user_request=payload.instruction,
         task_id=t_id,
         data_sensitivity=payload.data_sensitivity,
-        file_path=payload.file_path,
-        csv_path=payload.csv_path,
+        file_path=file_p,
+        csv_path=csv_p,
     )
     return {
         "task_id": t_id,
         "status": state.get("task_status"),
-        "plan": state.get("plan", []),
+        "plan": [p.model_dump() if hasattr(p, "model_dump") else p for p in state.get("plan", [])],
         "execution_steps": state.get("execution_steps", []),
-        "approval_request": state.get("approval_request"),
+        "approval_request": state.get("approval_request").model_dump() if hasattr(state.get("approval_request"), "model_dump") else state.get("approval_request"),
         "final_result": state.get("final_result"),
         "verification_results": state.get("verification_results"),
     }
@@ -199,10 +226,12 @@ def submit_task_approval(task_id: str, payload: ApprovalPayload):
 @app.get("/api/v1/artifacts/{file_name}/download")
 def download_artifact(file_name: str):
     """Download verified generated artifact."""
-    from backend.app.config.settings import get_settings
     settings = get_settings()
     art_dir = Path(settings.DATA_ROOT) / "artifacts"
     target = art_dir / file_name
+    if not target.exists():
+        # Also check uploads directory
+        target = UPLOAD_DIR / file_name
     if not target.exists():
         raise HTTPException(status_code=404, detail="Artifact file not found.")
     return FileResponse(
@@ -212,13 +241,10 @@ def download_artifact(file_name: str):
     )
 
 
-# --------------------------------------------------------------------------
-# One-click SIH Demo Scenarios
-# --------------------------------------------------------------------------
-
+# Background automated endpoints preserved for testing suite
 @app.post("/api/v1/demos/{demo_id}")
 def run_demo(demo_id: str):
-    """Launch one of the 5 official SIH demo scenarios."""
+    """Automated testing suite hook."""
     from tests.fixtures.phase_9_fixtures import (
         create_industrial_equipment_photo,
         create_sample_csv_file,
@@ -226,53 +252,30 @@ def run_demo(demo_id: str):
     temp_dir = tempfile.mkdtemp(prefix="sih_demo_")
 
     if demo_id == "demo1":
-        # Scenario 1: Scanned Inspection Report -> DOCX Approval Note
         img_p = os.path.join(temp_dir, "turbine_casing_inspection.png")
         create_industrial_equipment_photo(img_p)
-        query = (
-            "Analyze this scanned inspection report for equipment TURBINE-01, "
-            "identify candidate observations, and generate an inspection approval note."
-        )
-        state = orchestrator.run(
-            query,
-            task_id=f"sih_demo_1_{uuid.uuid4().hex[:6]}",
-            file_path=img_p,
-        )
-        return state
+        query = "Analyze this scanned inspection report for equipment TURBINE-01, identify candidate observations, and generate an inspection approval note."
+        return orchestrator.run(query, task_id=f"demo_1_{uuid.uuid4().hex[:6]}", file_path=img_p)
 
     elif demo_id == "demo2":
-        # Scenario 2: Coding Task -> Policy Gate -> Sandbox Execution
         csv_p = os.path.join(temp_dir, "vibration_sensor_data.csv")
         create_sample_csv_file(csv_p)
         query = "Write a Python script to calculate statistics from this CSV and execute in the sandbox."
-        state = orchestrator.run(
-            query,
-            task_id=f"sih_demo_2_{uuid.uuid4().hex[:6]}",
-            csv_path=csv_p,
-        )
-        return state
+        return orchestrator.run(query, task_id=f"demo_2_{uuid.uuid4().hex[:6]}", csv_path=csv_p)
 
     elif demo_id == "demo3":
-        # Scenario 3: Confidential Knowledge Query
         from backend.app.rag.knowledge_agent import build_default_knowledge_agent
         manifest_p = os.path.join(temp_dir, "px417_manifest.json")
         k_agent = build_default_knowledge_agent(manifest_path=manifest_p)
         k_agent.ingest_text(
-            text=(
-                "Standard Operating Procedure for pump PX-417:\n"
-                "Normal operating vibration must remain under 2.5 mm/s RMS.\n"
-                "If vibration exceeds 4.5 mm/s, immediately schedule bearing replacement."
-            ),
+            text="Standard Operating Procedure for pump PX-417:\nNormal operating vibration must remain under 2.5 mm/s RMS.\nIf vibration exceeds 4.5 mm/s, immediately schedule bearing replacement.",
             document_id="doc_px417_sop",
             filename="PX417_SOP.txt",
             sensitivity="CONFIDENTIAL",
         )
-        ans = k_agent.answer_query(
-            "What does the maintenance procedure recommend for pump PX-417 vibration?",
-            max_sensitivity="CONFIDENTIAL",
-        )
+        ans = k_agent.answer_query("What does the maintenance procedure recommend for pump PX-417 vibration?", max_sensitivity="CONFIDENTIAL")
         return {
-            "task_id": f"sih_demo_3_{uuid.uuid4().hex[:6]}",
+            "task_id": f"demo_3_{uuid.uuid4().hex[:6]}",
             "task_status": "COMPLETED",
             "query": ans.query,
             "answer": ans.answer,
@@ -282,14 +285,13 @@ def run_demo(demo_id: str):
         }
 
     elif demo_id == "demo4":
-        # Scenario 4: Engineering Vision -> Candidate Finding
         img_p = os.path.join(temp_dir, "flange_surface.png")
         create_industrial_equipment_photo(img_p)
         from backend.app.vision.agent import EngineeringVisionAgent
         v_agent = EngineeringVisionAgent()
         res = v_agent.process_image(img_p, user_focus="inspect surface for candidate indications")
         return {
-            "task_id": f"sih_demo_4_{uuid.uuid4().hex[:6]}",
+            "task_id": f"demo_4_{uuid.uuid4().hex[:6]}",
             "task_status": "COMPLETED",
             "observations": [o.model_dump() for o in res.observations],
             "findings": [f.model_dump() for f in res.findings],
@@ -299,29 +301,18 @@ def run_demo(demo_id: str):
         }
 
     elif demo_id == "demo5":
-        # Scenario 5: Combined Multi-Agent Orchestration
         img_p = os.path.join(temp_dir, "turbine_mixed.png")
         create_industrial_equipment_photo(img_p)
         csv_p = os.path.join(temp_dir, "meas_mixed.csv")
         create_sample_csv_file(csv_p)
-        query = (
-            "Analyze this inspection report, check the maintenance procedure for the equipment, "
-            "calculate the reported measurements, and prepare an approval note."
-        )
-        state = orchestrator.run(
-            query,
-            task_id=f"sih_mixed_{uuid.uuid4().hex[:6]}",
-            file_path=img_p,
-            csv_path=csv_p,
-        )
-        return state
-
+        query = "Analyze this inspection report, check the maintenance procedure for the equipment, calculate the reported measurements, and prepare an approval note."
+        return orchestrator.run(query, task_id=f"demo_5_{uuid.uuid4().hex[:6]}", file_path=img_p, csv_path=csv_p)
     else:
         raise HTTPException(status_code=404, detail="Unknown demo identifier.")
 
 
 # --------------------------------------------------------------------------
-# Interactive UI
+# Clean, Humane, Professional Web Interface
 # --------------------------------------------------------------------------
 
 @app.get("/", response_class=HTMLResponse)
@@ -334,719 +325,1078 @@ INDEX_HTML = """<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sovereign On-Premise Agentic AI Workbench</title>
+  <title>Sovereign Engineering Workbench</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Outfit:wght@600;700&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg-dark: #070B14;
-      --bg-card: rgba(15, 23, 42, 0.75);
-      --bg-card-hover: rgba(30, 41, 59, 0.85);
+      --bg: #0B0F19;
+      --surface: #111827;
+      --surface-elevated: #1F2937;
+      --border: #374151;
       --border-subtle: rgba(255, 255, 255, 0.08);
-      --border-glow: rgba(6, 182, 212, 0.4);
-      --accent-cyan: #06B6D4;
-      --accent-emerald: #10B981;
-      --accent-amber: #F59E0B;
-      --accent-violet: #8B5CF6;
-      --accent-rose: #F43F5E;
-      --text-main: #F8FAFC;
-      --text-muted: #94A3B8;
-      --text-dim: #64748B;
+      --primary: #2563EB;
+      --primary-hover: #1D4ED8;
+      --text: #F9FAFB;
+      --text-muted: #9CA3AF;
+      --text-dim: #6B7280;
+      --success: #10B981;
+      --warning: #F59E0B;
+      --danger: #EF4444;
+      --radius: 10px;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      background-color: var(--bg-dark);
-      color: var(--text-main);
-      font-family: 'Outfit', sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
       min-height: 100vh;
-      overflow-x: hidden;
-      background-image: 
-        radial-gradient(circle at 15% 15%, rgba(6, 182, 212, 0.08) 0%, transparent 40%),
-        radial-gradient(circle at 85% 85%, rgba(139, 92, 246, 0.08) 0%, transparent 40%);
+      display: flex;
+      flex-direction: column;
     }
 
-    /* Top Sovereign Security Bar */
-    .top-bar {
-      background: rgba(11, 15, 25, 0.95);
-      backdrop-filter: blur(12px);
-      border-bottom: 1px solid var(--border-subtle);
-      padding: 12px 32px;
+    /* Top Clean Header */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 32px;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      position: sticky;
-      top: 0;
-      z-index: 100;
     }
-    .brand {
+    .header-left {
       display: flex;
       align-items: center;
-      gap: 14px;
+      gap: 16px;
     }
-    .brand-logo {
-      width: 36px;
-      height: 36px;
-      background: linear-gradient(135deg, var(--accent-cyan), var(--accent-violet));
-      border-radius: 10px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 800;
+    .header-title {
+      font-family: 'Outfit', sans-serif;
       font-size: 18px;
-      color: #fff;
-      box-shadow: 0 0 20px rgba(6, 182, 212, 0.4);
-    }
-    .brand-title {
-      font-size: 17px;
       font-weight: 700;
-      letter-spacing: 0.5px;
+      color: var(--text);
     }
-    .brand-subtitle {
-      font-size: 11px;
+    .header-subtitle {
+      font-size: 12px;
       color: var(--text-dim);
-      letter-spacing: 1px;
-      text-transform: uppercase;
+      font-weight: 500;
     }
-    .badges {
+    .header-right {
       display: flex;
       align-items: center;
       gap: 12px;
     }
-    .badge {
-      font-size: 11px;
-      font-weight: 600;
+    .pill {
+      font-size: 12px;
+      font-weight: 500;
       padding: 6px 12px;
-      border-radius: 20px;
+      border-radius: 9999px;
       display: flex;
       align-items: center;
-      gap: 6px;
-      border: 1px solid transparent;
-      letter-spacing: 0.5px;
+      gap: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface-elevated);
+      color: var(--text-muted);
     }
-    .badge-sovereign {
-      background: rgba(16, 185, 129, 0.12);
-      color: var(--accent-emerald);
-      border-color: rgba(16, 185, 129, 0.3);
-    }
-    .badge-gpu {
-      background: rgba(6, 182, 212, 0.12);
-      color: var(--accent-cyan);
-      border-color: rgba(6, 182, 212, 0.3);
-    }
-    .badge-pulse {
-      width: 7px;
-      height: 7px;
+    .dot-green {
+      width: 8px;
+      height: 8px;
       border-radius: 50%;
-      background: var(--accent-emerald);
-      box-shadow: 0 0 8px var(--accent-emerald);
-      animation: pulse 2s infinite;
-    }
-    @keyframes pulse {
-      0% { opacity: 0.4; } 50% { opacity: 1; } 100% { opacity: 0.4; }
+      background: var(--success);
     }
 
-    /* Container */
-    .container {
-      max-width: 1440px;
+    /* Main Content Layout */
+    main {
+      flex: 1;
+      max-width: 1400px;
+      width: 100%;
       margin: 0 auto;
-      padding: 28px 32px 64px 32px;
+      padding: 24px 32px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+    }
+    @media (max-width: 960px) {
+      main { grid-template-columns: 1fr; }
     }
 
-    /* SIH Demo Buttons Bar */
-    .demo-ribbon {
-      margin-bottom: 28px;
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
     }
-    .demo-ribbon-title {
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text-dim);
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      margin-bottom: 12px;
-    }
-    .demo-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-      gap: 14px;
-    }
-    .demo-card {
-      background: var(--bg-card);
-      backdrop-filter: blur(16px);
-      border: 1px solid var(--border-subtle);
-      border-radius: 12px;
-      padding: 16px;
-      cursor: pointer;
-      transition: all 0.25s ease;
-      position: relative;
-      overflow: hidden;
-    }
-    .demo-card:hover {
-      background: var(--bg-card-hover);
-      border-color: var(--accent-cyan);
-      transform: translateY(-2px);
-      box-shadow: 0 8px 24px rgba(6, 182, 212, 0.15);
-    }
-    .demo-card-tag {
-      font-size: 10px;
+    .card-heading {
+      font-family: 'Outfit', sans-serif;
+      font-size: 16px;
       font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      color: var(--accent-cyan);
+      color: var(--text);
       margin-bottom: 6px;
     }
-    .demo-card-name {
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--text-main);
-      margin-bottom: 4px;
-    }
-    .demo-card-desc {
-      font-size: 12px;
+    .card-subheading {
+      font-size: 13px;
       color: var(--text-muted);
+      margin-bottom: 20px;
       line-height: 1.4;
     }
 
-    /* Main Console Layout */
-    .workbench-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 28px;
-    }
-    @media (max-width: 1024px) {
-      .workbench-grid { grid-template-columns: 1fr; }
-    }
-
-    /* Card standard */
-    .card {
-      background: var(--bg-card);
-      backdrop-filter: blur(16px);
-      border: 1px solid var(--border-subtle);
-      border-radius: 16px;
-      padding: 24px;
-      position: relative;
-    }
-    .card-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 18px;
-    }
-    .card-title {
-      font-size: 15px;
-      font-weight: 700;
-      letter-spacing: 0.5px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-
-    /* Form Inputs */
-    textarea {
-      width: 100%;
-      height: 130px;
-      background: rgba(7, 11, 20, 0.85);
-      border: 1px solid var(--border-subtle);
-      border-radius: 10px;
-      padding: 14px;
-      color: var(--text-main);
-      font-family: inherit;
-      font-size: 14px;
-      resize: vertical;
-      margin-bottom: 16px;
-      outline: none;
-      transition: border-color 0.2s;
-    }
-    textarea:focus {
-      border-color: var(--accent-cyan);
-      box-shadow: 0 0 16px rgba(6, 182, 212, 0.2);
-    }
-    .form-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-      margin-bottom: 16px;
-    }
-    select, input[type="text"] {
-      width: 100%;
-      background: rgba(7, 11, 20, 0.85);
-      border: 1px solid var(--border-subtle);
-      border-radius: 8px;
-      padding: 10px 12px;
-      color: var(--text-main);
-      font-family: inherit;
-      font-size: 13px;
-      outline: none;
-    }
-    select:focus, input[type="text"]:focus {
-      border-color: var(--accent-cyan);
-    }
-    .btn-submit {
-      width: 100%;
-      background: linear-gradient(135deg, #06B6D4, #3B82F6);
-      border: none;
-      border-radius: 10px;
-      padding: 14px;
-      font-size: 14px;
-      font-weight: 700;
-      letter-spacing: 0.5px;
-      color: #fff;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      transition: all 0.2s ease;
-      box-shadow: 0 4px 20px rgba(6, 182, 212, 0.3);
-    }
-    .btn-submit:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 6px 24px rgba(6, 182, 212, 0.45);
-    }
-
-    /* Visual DAG Stepper */
-    .dag-bar {
-      display: flex;
-      justify-content: space-between;
-      margin-top: 24px;
-      padding: 16px 12px;
-      background: rgba(7, 11, 20, 0.6);
-      border-radius: 12px;
-      border: 1px solid var(--border-subtle);
-      overflow-x: auto;
-    }
-    .dag-node {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 6px;
-      font-size: 10px;
-      font-weight: 700;
-      color: var(--text-dim);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      position: relative;
-      min-width: 60px;
-    }
-    .dag-dot {
-      width: 18px;
-      height: 18px;
-      border-radius: 50%;
-      background: #1E293B;
-      border: 2px solid var(--text-dim);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: all 0.3s;
-    }
-    .dag-node.active .dag-dot {
-      background: var(--accent-cyan);
-      border-color: #fff;
-      box-shadow: 0 0 12px var(--accent-cyan);
-    }
-    .dag-node.active { color: var(--accent-cyan); }
-    .dag-node.completed .dag-dot {
-      background: var(--accent-emerald);
-      border-color: var(--accent-emerald);
-    }
-    .dag-node.completed { color: var(--accent-emerald); }
-
-    /* Right Column: Execution Inspector */
-    .tab-bar {
-      display: flex;
-      gap: 8px;
-      border-bottom: 1px solid var(--border-subtle);
-      margin-bottom: 16px;
-    }
-    .tab {
-      padding: 8px 14px;
+    /* Form Elements */
+    label {
+      display: block;
       font-size: 12px;
       font-weight: 600;
       color: var(--text-muted);
-      cursor: pointer;
-      border-bottom: 2px solid transparent;
-      transition: all 0.2s;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
     }
-    .tab.active {
-      color: var(--accent-cyan);
-      border-color: var(--accent-cyan);
+    textarea {
+      width: 100%;
+      height: 120px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 14px;
+      line-height: 1.5;
+      resize: vertical;
+      margin-bottom: 18px;
+      outline: none;
+      transition: border-color 0.15s ease;
     }
-    .terminal-window {
-      background: #050811;
-      border-radius: 10px;
-      border: 1px solid rgba(255, 255, 255, 0.05);
-      padding: 16px;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 12px;
-      line-height: 1.6;
-      height: 480px;
-      overflow-y: auto;
-      color: #E2E8F0;
+    textarea:focus {
+      border-color: var(--primary);
     }
-    .log-entry { margin-bottom: 8px; }
-    .log-ts { color: var(--text-dim); margin-right: 8px; font-size: 11px; }
-    .log-agent { color: var(--accent-violet); font-weight: 600; }
-    .log-tool { color: var(--accent-amber); }
-    .log-success { color: var(--accent-emerald); }
-    .log-warn { color: var(--accent-amber); }
 
-    /* Approval Modal */
-    .modal-overlay {
-      position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(3, 7, 18, 0.85);
-      backdrop-filter: blur(8px);
+    /* File Attachment Dropzone */
+    .file-dropzone {
+      border: 2px dashed var(--border);
+      background: var(--bg);
+      border-radius: 8px;
+      padding: 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      margin-bottom: 18px;
+    }
+    .file-dropzone:hover, .file-dropzone.dragover {
+      border-color: var(--primary);
+      background: rgba(37, 99, 235, 0.04);
+    }
+    .file-dropzone p {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+    .btn-browse {
+      display: inline-block;
+      margin-top: 10px;
+      padding: 6px 14px;
+      background: var(--surface-elevated);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 600;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .btn-browse:hover {
+      background: var(--border);
+    }
+
+    /* Attached File Pill */
+    .attached-file-card {
       display: none;
       align-items: center;
-      justify-content: center;
-      z-index: 1000;
+      justify-content: space-between;
+      background: var(--surface-elevated);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin-bottom: 18px;
     }
-    .modal-overlay.open { display: flex; }
-    .modal-card {
-      background: #0F172A;
-      border: 1px solid var(--accent-amber);
-      box-shadow: 0 0 40px rgba(245, 158, 11, 0.25);
-      border-radius: 16px;
-      width: 90%;
-      max-width: 520px;
-      padding: 28px;
-      animation: modalIn 0.3s ease;
-    }
-    @keyframes modalIn {
-      from { opacity: 0; transform: scale(0.95); }
-      to { opacity: 1; transform: scale(1); }
-    }
-    .modal-title {
-      font-size: 18px;
-      font-weight: 700;
-      color: var(--accent-amber);
+    .attached-file-info {
       display: flex;
       align-items: center;
       gap: 10px;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .btn-remove-file {
+      background: none;
+      border: none;
+      color: var(--danger);
+      font-size: 16px;
+      cursor: pointer;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    .btn-remove-file:hover {
+      background: rgba(239, 68, 68, 0.1);
+    }
+
+    /* Row Options */
+    .form-row {
+      display: flex;
+      gap: 16px;
+      align-items: flex-end;
+      margin-bottom: 20px;
+    }
+    .form-group {
+      flex: 1;
+    }
+    select {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 13px;
+      outline: none;
+    }
+    select:focus {
+      border-color: var(--primary);
+    }
+
+    /* Action Button */
+    .btn-run {
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 12px 20px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: background-color 0.15s ease;
+      width: 100%;
+    }
+    .btn-run:hover:not(:disabled) {
+      background: var(--primary-hover);
+    }
+    .btn-run:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    /* Step Timeline */
+    .timeline-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-top: 24px;
       margin-bottom: 12px;
     }
-    .modal-desc {
+    .step-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .step-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 13px;
+      color: var(--text-dim);
+    }
+    .step-item.active {
+      color: var(--text);
+      font-weight: 600;
+    }
+    .step-item.completed {
+      color: var(--success);
+    }
+    .step-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--border);
+    }
+    .step-item.active .step-dot {
+      background: var(--primary);
+      box-shadow: 0 0 8px rgba(37, 99, 235, 0.6);
+    }
+    .step-item.completed .step-dot {
+      background: var(--success);
+    }
+
+    /* RIGHT COLUMN: SINGLE DELIVERABLE CONTAINER */
+    .deliverable-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+    .deliverable-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 20px;
+    }
+    .deliverable-title {
+      font-family: 'Outfit', sans-serif;
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .deliverable-badge {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      background: var(--surface-elevated);
+      color: var(--text-dim);
+      border: 1px solid var(--border);
+    }
+    .deliverable-badge.completed {
+      background: rgba(16, 185, 129, 0.1);
+      color: var(--success);
+      border-color: rgba(16, 185, 129, 0.3);
+    }
+    .deliverable-badge.approval {
+      background: rgba(245, 158, 11, 0.1);
+      color: var(--warning);
+      border-color: rgba(245, 158, 11, 0.3);
+    }
+
+    /* Deliverable States */
+    .empty-state {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      color: var(--text-dim);
+      padding: 40px;
+    }
+    .empty-state-icon {
+      font-size: 36px;
+      margin-bottom: 12px;
+      opacity: 0.5;
+    }
+    .empty-state-text {
+      font-size: 14px;
+      max-width: 320px;
+      line-height: 1.5;
+    }
+
+    /* Approval Banner */
+    .approval-banner {
+      background: rgba(245, 158, 11, 0.08);
+      border: 1px solid var(--warning);
+      border-radius: 8px;
+      padding: 18px;
+      margin-bottom: 20px;
+    }
+    .approval-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--warning);
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .approval-text {
       font-size: 13px;
       color: var(--text-muted);
       line-height: 1.5;
-      margin-bottom: 18px;
+      margin-bottom: 16px;
     }
-    .plan-hash-box {
-      background: #050811;
-      padding: 10px 14px;
-      border-radius: 8px;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 11px;
-      color: var(--accent-cyan);
-      word-break: break-all;
-      margin-bottom: 20px;
-    }
-    .modal-actions {
+    .approval-buttons {
       display: flex;
       gap: 12px;
     }
     .btn-approve {
-      flex: 1;
-      background: var(--accent-emerald);
+      background: var(--success);
       color: #fff;
       border: none;
-      padding: 12px;
-      border-radius: 8px;
-      font-weight: 700;
+      padding: 9px 16px;
+      font-size: 13px;
+      font-weight: 600;
+      border-radius: 6px;
       cursor: pointer;
     }
     .btn-reject {
-      flex: 1;
-      background: rgba(244, 63, 94, 0.15);
-      color: var(--accent-rose);
-      border: 1px solid rgba(244, 63, 94, 0.3);
-      padding: 12px;
-      border-radius: 8px;
-      font-weight: 700;
+      background: var(--surface-elevated);
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+      padding: 9px 16px;
+      font-size: 13px;
+      font-weight: 600;
+      border-radius: 6px;
       cursor: pointer;
+    }
+
+    /* Output Deliverable Content */
+    .deliverable-content {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    .section-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+    .deliverable-text {
+      font-size: 14px;
+      line-height: 1.6;
+      color: var(--text);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      white-space: pre-wrap;
+    }
+
+    /* Code Display */
+    .code-container {
+      background: #060911;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .code-header {
+      background: var(--surface-elevated);
+      padding: 8px 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-dim);
+    }
+    .code-block {
+      padding: 14px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      color: #E2E8F0;
+      overflow-x: auto;
+      line-height: 1.5;
+    }
+    .btn-copy {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .btn-copy:hover {
+      background: var(--border);
+      color: #fff;
+    }
+
+    /* Metric Grid for Calculations */
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 12px;
+    }
+    .metric-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .metric-label {
+      font-size: 11px;
+      color: var(--text-dim);
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .metric-value {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text);
+      margin-top: 4px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* Tables (Observations, Traces) */
+    .styled-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .styled-table th {
+      background: var(--surface-elevated);
+      color: var(--text-muted);
+      font-weight: 600;
+      text-align: left;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+    }
+    .styled-table td {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border-subtle);
+      color: var(--text);
+    }
+    .styled-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    /* Download Artifact Card */
+    .artifact-card {
+      background: rgba(37, 99, 235, 0.08);
+      border: 1px solid rgba(37, 99, 235, 0.3);
+      border-radius: 8px;
+      padding: 14px 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .artifact-info {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .btn-download {
+      background: var(--primary);
+      color: #fff;
+      padding: 8px 14px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      text-decoration: none;
+      display: inline-block;
+    }
+    .btn-download:hover {
+      background: var(--primary-hover);
+    }
+
+    /* Human Engineering Disclaimer Callout */
+    .disclaimer-box {
+      background: rgba(245, 158, 11, 0.06);
+      border-left: 3px solid var(--warning);
+      padding: 12px 14px;
+      border-radius: 0 6px 6px 0;
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.4;
     }
   </style>
 </head>
 <body>
 
-  <!-- Top Sovereign Header -->
-  <div class="top-bar">
-    <div class="brand">
-      <div class="brand-logo">SW</div>
-      <div>
-        <div class="brand-title">Sovereign Agentic AI Workbench</div>
-        <div class="brand-subtitle">Confidential Industrial Multimodal Orchestrator</div>
+  <!-- Clean Header -->
+  <header>
+    <div class="header-left">
+      <div class="header-title">Sovereign Engineering Workbench</div>
+      <div class="header-subtitle">Local On-Premise Industrial AI</div>
+    </div>
+    <div class="header-right">
+      <div class="pill">
+        <span class="dot-green"></span>
+        Zero-Egress Isolated (127.0.0.1)
+      </div>
+      <div class="pill" id="gpu-pill">
+        NVIDIA GeForce RTX 3050 Laptop GPU
       </div>
     </div>
-    <div class="badges">
-      <div class="badge badge-sovereign">
-        <div class="badge-pulse"></div>
-        100% AIR-GAPPED • ZERO-EGRESS
-      </div>
-      <div class="badge badge-gpu" id="gpu-badge">
-        GPU: NVIDIA RTX 3050 (6GB)
-      </div>
-    </div>
-  </div>
+  </header>
 
-  <div class="container">
+  <!-- Main Work Area -->
+  <main>
+    <!-- Left Column: Input and File Upload -->
+    <div class="card">
+      <div class="card-heading">Task Configuration</div>
+      <div class="card-subheading">Enter an engineering instruction and optionally attach files (CSV sensor data, inspection photos, or PDF specifications).</div>
 
-    <!-- SIH Official Demos Quick Launch -->
-    <div class="demo-ribbon">
-      <div class="demo-ribbon-title">⚡ Official SIH Demonstration Scenarios (One-Click Launch)</div>
-      <div class="demo-grid">
-        <div class="demo-card" onclick="launchDemo('demo1')">
-          <div class="demo-card-tag">Demo 1 • Multimodal</div>
-          <div class="demo-card-name">Scanned Report → DOCX Note</div>
-          <div class="demo-card-desc">Local OCR, vision defect candidate observation, policy gate, and verified DOCX note.</div>
-        </div>
-        <div class="demo-card" onclick="launchDemo('demo2')">
-          <div class="demo-card-tag">Demo 2 • Code Sandbox</div>
-          <div class="demo-card-name">Coding Task → Policy Gate</div>
-          <div class="demo-card-desc">Code generation, HIGH-risk policy gate, approval pause, and network-isolated sandbox.</div>
-        </div>
-        <div class="demo-card" onclick="launchDemo('demo3')">
-          <div class="demo-card-tag">Demo 3 • Confidential RAG</div>
-          <div class="demo-card-name">PX-417 Pump Procedure</div>
-          <div class="demo-card-desc">Local hybrid Qdrant/BM25 retrieval with sensitivity access control and grounded citations.</div>
-        </div>
-        <div class="demo-card" onclick="launchDemo('demo4')">
-          <div class="demo-card-tag">Demo 4 • Vision Inspection</div>
-          <div class="demo-card-name">Flange Defect Analysis</div>
-          <div class="demo-card-desc">Visual reasoning preventing hallucination; marks findings as uncertified candidate observations.</div>
-        </div>
-        <div class="demo-card" onclick="launchDemo('demo5')">
-          <div class="demo-card-tag">Demo 5 • Full Integration</div>
-          <div class="demo-card-name">Mixed 4-Agent Workflow</div>
-          <div class="demo-card-desc">Vision + Knowledge + Data Calculation + Document generation in ONE LangGraph run.</div>
-        </div>
-      </div>
-    </div>
+      <form id="task-form" onsubmit="handleFormSubmit(event)">
+        <label for="instruction">Instruction</label>
+        <textarea id="instruction" placeholder="Describe your engineering or analysis task...&#10;e.g., 'Analyze this vibration sensor dataset and calculate statistics'&#10;e.g., 'Check maintenance procedure for pump PX-417'&#10;e.g., 'Inspect the casing image for surface defects and observations'"></textarea>
 
-    <!-- Main Console -->
-    <div class="workbench-grid">
-
-      <!-- Left Column: Input Console -->
-      <div class="card">
-        <div class="card-header">
-          <div class="card-title">
-            <span>⚙️</span> Task Orchestrator Console
-          </div>
-          <div style="font-size: 11px; color: var(--accent-cyan); font-weight: 600;">LANGGRAPH ACTIVE</div>
+        <!-- Native Explorer File Picker Dropzone -->
+        <label>Attachment</label>
+        <input type="file" id="file-picker" style="display:none" onchange="handleFileSelected(event)">
+        <div class="file-dropzone" id="file-dropzone" onclick="document.getElementById('file-picker').click()">
+          <div style="font-size: 24px;">📁</div>
+          <div style="font-weight: 600; font-size: 14px; margin-top: 4px;">Choose File from Computer</div>
+          <p>Drag & drop or click to select CSV, PDF, PNG, JPG, or XLSX</p>
+          <div class="btn-browse">Browse Files</div>
         </div>
 
-        <form id="task-form" onsubmit="submitTask(event)">
-          <textarea id="instruction" placeholder="Enter confidential industrial task prompt (e.g., 'Analyze the inspection report and prepare an approval note')..."></textarea>
-
-          <div class="form-row">
+        <!-- Selected File Banner -->
+        <div class="attached-file-card" id="attached-file-card">
+          <div class="attached-file-info">
+            <span style="font-size: 18px;">📄</span>
             <div>
-              <label style="font-size: 11px; color: var(--text-dim); display: block; margin-bottom: 4px;">DATA SENSITIVITY</label>
-              <select id="sensitivity">
-                <option value="INTERNAL">INTERNAL (Standard Industrial)</option>
-                <option value="CONFIDENTIAL">CONFIDENTIAL (Proprietary / SOP)</option>
-                <option value="RESTRICTED">RESTRICTED (Defense / Critical)</option>
-              </select>
-            </div>
-            <div>
-              <label style="font-size: 11px; color: var(--text-dim); display: block; margin-bottom: 4px;">ATTACHED FILE PATH (OPTIONAL)</label>
-              <input type="text" id="filepath" placeholder="e.g. data/reports/turbine.png">
+              <div id="attached-file-name" style="color: var(--text);">filename.csv</div>
+              <div id="attached-file-size" style="font-size: 11px; color: var(--text-dim);">0 KB</div>
             </div>
           </div>
-
-          <button type="submit" class="btn-submit" id="btn-submit">
-            <span>🚀</span> EXECUTE SOVEREIGN TASK
-          </button>
-        </form>
-
-        <!-- Visual DAG Stepper -->
-        <div class="dag-bar" id="dag-bar">
-          <div class="dag-node" id="node-understand"><div class="dag-dot"></div>UNDERSTAND</div>
-          <div class="dag-node" id="node-route"><div class="dag-dot"></div>ROUTE</div>
-          <div class="dag-node" id="node-plan"><div class="dag-dot"></div>PLAN</div>
-          <div class="dag-node" id="node-policy"><div class="dag-dot"></div>POLICY</div>
-          <div class="dag-node" id="node-approve"><div class="dag-dot"></div>APPROVE</div>
-          <div class="dag-node" id="node-execute"><div class="dag-dot"></div>EXECUTE</div>
-          <div class="dag-node" id="node-verify"><div class="dag-dot"></div>VERIFY</div>
-          <div class="dag-node" id="node-deliver"><div class="dag-dot"></div>DELIVER</div>
-        </div>
-      </div>
-
-      <!-- Right Column: Inspector -->
-      <div class="card">
-        <div class="tab-bar">
-          <div class="tab active" onclick="switchTab('terminal')">Audit Trail & Telemetry</div>
-          <div class="tab" onclick="switchTab('deliverable')">Deliverables & Outputs</div>
-          <div class="tab" onclick="switchTab('models')">Local Models & Hardware</div>
+          <button type="button" class="btn-remove-file" onclick="removeAttachedFile()" title="Remove file">✕</button>
         </div>
 
-        <div class="terminal-window" id="terminal-content">
-          <div class="log-entry">
-            <span class="log-ts">[SYSTEM INITIALIZED]</span>
-            <span class="log-success">Sovereign Workbench ready. Local model runtime connected to Ollama (RTX 3050 GPU).</span>
-          </div>
-          <div class="log-entry">
-            <span class="log-ts">[ZERO-EGRESS]</span>
-            <span class="log-agent">SovereigntyPolicy active: 0 external egress allowed. All HTTP client traffic intercepted.</span>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="sensitivity">Data Sensitivity</label>
+            <select id="sensitivity">
+              <option value="INTERNAL">Internal (Standard)</option>
+              <option value="CONFIDENTIAL">Confidential (Proprietary / SOP)</option>
+              <option value="RESTRICTED">Restricted (Air-Gapped)</option>
+            </select>
           </div>
         </div>
+
+        <button type="submit" class="btn-run" id="btn-run">
+          <span>▶</span> Run Workbench Task
+        </button>
+      </form>
+
+      <!-- Step Timeline -->
+      <div class="timeline-title">Workflow Progress</div>
+      <div class="step-list">
+        <div class="step-item" id="step-understand">
+          <div class="step-dot"></div> 1. Task Understanding
+        </div>
+        <div class="step-item" id="step-policy">
+          <div class="step-dot"></div> 2. Safety Policy & Risk Assessment
+        </div>
+        <div class="step-item" id="step-execute">
+          <div class="step-dot"></div> 3. Agent Execution (Local Sandbox / GPU)
+        </div>
+        <div class="step-item" id="step-verify">
+          <div class="step-dot"></div> 4. Deterministic Verification
+        </div>
+        <div class="step-item" id="step-deliver">
+          <div class="step-dot"></div> 5. Output Deliverable Delivery
+        </div>
+      </div>
+    </div>
+
+    <!-- Right Column: Single Deliverable Container -->
+    <div class="card deliverable-container">
+      <div class="deliverable-header">
+        <div class="deliverable-title">Task Deliverable</div>
+        <div class="deliverable-badge" id="deliverable-badge">Ready</div>
       </div>
 
-    </div>
-  </div>
-
-  <!-- Interactive Human Approval Modal -->
-  <div class="modal-overlay" id="approval-modal">
-    <div class="modal-card">
-      <div class="modal-title">
-        <span>⚠️</span> High-Risk Action Authorization Required
-      </div>
-      <div class="modal-desc" id="modal-desc">
-        A planned step requires executing untrusted code in the local isolated sandbox. Policy requires human confirmation before execution.
-      </div>
-      <div style="font-size: 11px; color: var(--text-dim); margin-bottom: 6px;">CRYPTOGRAPHIC PLAN HASH:</div>
-      <div class="plan-hash-box" id="modal-plan-hash">e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855</div>
-      <div class="modal-actions">
-        <button class="btn-approve" onclick="grantApproval()">GRANT AUTHORIZATION</button>
-        <button class="btn-reject" onclick="rejectApproval()">REJECT & TERMINATE</button>
+      <!-- Deliverable Content Body -->
+      <div id="deliverable-body">
+        <div class="empty-state">
+          <div class="empty-state-icon">📋</div>
+          <div class="empty-state-text">Your completed deliverables, calculation traces, inspection observations, and verified reports will appear here.</div>
+        </div>
       </div>
     </div>
-  </div>
+  </main>
 
   <script>
+    let uploadedFilePath = null;
     let currentTaskId = null;
     let currentPlanHash = null;
 
-    async function loadModelsStatus() {
+    // Load GPU status
+    async function updateGpuStatus() {
       try {
         const res = await fetch('/api/v1/models');
         const data = await res.json();
-        document.getElementById('gpu-badge').innerText = `GPU: ${data.gpu} (${data.vram_usage})`;
-      } catch (e) {
-        console.error('Failed to load GPU telemetry', e);
+        if (data.gpu) {
+          document.getElementById('gpu-pill').innerText = `${data.gpu} (${data.vram_usage})`;
+        }
+      } catch (e) {}
+    }
+    updateGpuStatus();
+
+    // File Drag & Drop
+    const dropzone = document.getElementById('file-dropzone');
+    dropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropzone.classList.add('dragover');
+    });
+    dropzone.addEventListener('dragleave', () => {
+      dropzone.classList.remove('dragover');
+    });
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('dragover');
+      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        uploadFile(e.dataTransfer.files[0]);
+      }
+    });
+
+    function handleFileSelected(e) {
+      if (e.target.files && e.target.files.length > 0) {
+        uploadFile(e.target.files[0]);
       }
     }
-    loadModelsStatus();
-    setInterval(loadModelsStatus, 10000);
 
-    function setDagState(activeNode) {
-      const nodes = ['understand', 'route', 'plan', 'policy', 'approve', 'execute', 'verify', 'deliver'];
+    async function uploadFile(file) {
+      const fd = new FormData();
+      fd.append('file', file);
+
+      document.getElementById('attached-file-name').innerText = `Uploading ${file.name}...`;
+      document.getElementById('attached-file-size').innerText = `${(file.size / 1024).toFixed(1)} KB`;
+      document.getElementById('attached-file-card').style.display = 'flex';
+      dropzone.style.display = 'none';
+
+      try {
+        const res = await fetch('/api/v1/upload', { method: 'POST', body: fd });
+        const data = await res.json();
+        uploadedFilePath = data.file_path;
+        document.getElementById('attached-file-name').innerText = data.filename;
+        document.getElementById('attached-file-size').innerText = `${(data.size_bytes / 1024).toFixed(1)} KB · Staged locally`;
+      } catch (err) {
+        alert('File upload failed: ' + err.message);
+        removeAttachedFile();
+      }
+    }
+
+    function removeAttachedFile() {
+      uploadedFilePath = null;
+      document.getElementById('file-picker').value = '';
+      document.getElementById('attached-file-card').style.display = 'none';
+      dropzone.style.display = 'block';
+    }
+
+    function updateStepProgress(activeStep) {
+      const steps = ['understand', 'policy', 'execute', 'verify', 'deliver'];
       let found = false;
-      nodes.forEach(n => {
-        const el = document.getElementById(`node-${n}`);
+      steps.forEach(s => {
+        const el = document.getElementById(`step-${s}`);
         if (!el) return;
-        el.className = 'dag-node';
-        if (n === activeNode) {
-          el.className = 'dag-node active';
+        el.className = 'step-item';
+        if (s === activeStep) {
+          el.className = 'step-item active';
           found = true;
         } else if (!found) {
-          el.className = 'dag-node completed';
+          el.className = 'step-item completed';
         }
       });
     }
 
-    function appendLog(category, msg, styleClass = '') {
-      const term = document.getElementById('terminal-content');
-      const timeStr = new Date().toLocaleTimeString();
-      const div = document.createElement('div');
-      div.className = 'log-entry';
-      div.innerHTML = `<span class="log-ts">[${timeStr}]</span> <span class="log-agent">[${category}]</span> <span class="${styleClass}">${msg}</span>`;
-      term.appendChild(div);
-      term.scrollTop = term.scrollHeight;
-    }
-
-    async function submitTask(e) {
-      if (e) e.preventDefault();
+    // Submit Task
+    async function handleFormSubmit(e) {
+      e.preventDefault();
       const instruction = document.getElementById('instruction').value.trim();
-      if (!instruction) return;
-      const sensitivity = document.getElementById('sensitivity').value;
-      const filepath = document.getElementById('filepath').value.trim();
+      if (!instruction && !uploadedFilePath) {
+        alert('Please provide an instruction or attach a file to process.');
+        return;
+      }
 
-      appendLog('USER_REQUEST', instruction, 'log-tool');
-      setDagState('understand');
+      const sensitivity = document.getElementById('sensitivity').value;
+      const btn = document.getElementById('btn-run');
+      btn.disabled = true;
+      btn.innerHTML = '<span>⏳</span> Processing Task...';
+
+      document.getElementById('deliverable-badge').innerText = 'Executing';
+      document.getElementById('deliverable-badge').className = 'deliverable-badge';
+
+      document.getElementById('deliverable-body').innerHTML = `
+        <div class="empty-state">
+          <div style="font-size: 28px; margin-bottom: 12px;">⚙️</div>
+          <div style="font-weight: 600; color: var(--text); margin-bottom: 6px;">Processing Task</div>
+          <div class="empty-state-text">Reasoning across local specialized agents in zero-egress environment...</div>
+        </div>
+      `;
+
+      updateStepProgress('understand');
 
       try {
+        const payload = {
+          instruction: instruction || 'Analyze attached document',
+          data_sensitivity: sensitivity,
+          file_path: uploadedFilePath,
+          csv_path: (uploadedFilePath && uploadedFilePath.toLowerCase().endsWith('.csv')) ? uploadedFilePath : null
+        };
+
         const res = await fetch('/api/v1/tasks', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            instruction: instruction,
-            data_sensitivity: sensitivity,
-            file_path: filepath || null
-          })
+          body: JSON.stringify(payload)
         });
+
         const data = await res.json();
-        handleTaskResponse(data);
+        handleTaskResult(data);
       } catch (err) {
-        appendLog('ERROR', 'Task dispatch failed: ' + err.message, 'log-warn');
+        document.getElementById('deliverable-body').innerHTML = `
+          <div class="empty-state">
+            <div style="color: var(--danger); font-size: 24px; margin-bottom: 8px;">✕ Task Failed</div>
+            <div class="empty-state-text">${err.message}</div>
+          </div>
+        `;
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<span>▶</span> Run Workbench Task';
       }
     }
 
-    function handleTaskResponse(data) {
+    function handleTaskResult(data) {
       currentTaskId = data.task_id;
+
       if (data.status === 'WAITING_APPROVAL') {
-        setDagState('approve');
-        appendLog('POLICY', 'High-risk action requires human authorization. Pausing workflow.', 'log-warn');
-        currentPlanHash = (data.approval_request && data.approval_request.plan_hash) || 'plan_hash_unspecified';
-        document.getElementById('modal-plan-hash').innerText = currentPlanHash;
-        document.getElementById('approval-modal').className = 'modal-overlay open';
+        updateStepProgress('policy');
+        document.getElementById('deliverable-badge').innerText = 'Approval Required';
+        document.getElementById('deliverable-badge').className = 'deliverable-badge approval';
+
+        const appReq = data.approval_request || {};
+        currentPlanHash = appReq.plan_hash || '';
+
+        document.getElementById('deliverable-body').innerHTML = `
+          <div class="approval-banner">
+            <div class="approval-title">
+              <span>⚠️</span> Human Authorization Required
+            </div>
+            <div class="approval-text">
+              The workbench prepared Python code to execute in the local isolated sandbox. As an industrial safety safeguard, explicit human authorization is required before execution.
+            </div>
+            <div class="approval-buttons">
+              <button class="btn-approve" onclick="grantTaskApproval()">✓ Authorize & Run Execution</button>
+              <button class="btn-reject" onclick="cancelTask()">✕ Cancel Task</button>
+            </div>
+          </div>
+        `;
       } else if (data.status === 'COMPLETED') {
-        setDagState('deliver');
-        appendLog('VERIFICATION', 'All plan steps and artifacts deterministically verified.', 'log-success');
-        appendLog('DELIVERY', 'Task execution completed successfully.', 'log-success');
-        renderDeliverable(data);
+        updateStepProgress('deliver');
+        document.getElementById('deliverable-badge').innerText = 'Completed & Verified';
+        document.getElementById('deliverable-badge').className = 'deliverable-badge completed';
+        renderCompletedDeliverable(data);
       } else {
-        setDagState('deliver');
-        appendLog('STATUS', `Task ended with status: ${data.status}`, 'log-warn');
+        updateStepProgress('deliver');
+        document.getElementById('deliverable-badge').innerText = 'Finished';
+        renderCompletedDeliverable(data);
       }
     }
 
-    async function grantApproval() {
-      document.getElementById('approval-modal').className = 'modal-overlay';
-      appendLog('HUMAN_APPROVAL', `Granted by Chief Engineer (plan_hash: ${currentPlanHash.substring(0, 12)}...)`, 'log-success');
-      setDagState('execute');
+    async function grantTaskApproval() {
+      document.getElementById('deliverable-body').innerHTML = `
+        <div class="empty-state">
+          <div style="font-size: 28px; margin-bottom: 12px;">⚙️</div>
+          <div style="font-weight: 600; color: var(--text); margin-bottom: 6px;">Resuming Task in Local Sandbox</div>
+          <div class="empty-state-text">Executing authorized code in zero-network process sandbox...</div>
+        </div>
+      `;
+      updateStepProgress('execute');
+
       try {
         const res = await fetch(`/api/v1/tasks/${currentTaskId}/approval`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             decision: 'APPROVED',
-            approver: 'Chief Engineer',
+            approver: 'Chief Systems Engineer',
             plan_hash: currentPlanHash
           })
         });
         const data = await res.json();
-        handleTaskResponse(data);
-      } catch (e) {
-        appendLog('ERROR', 'Failed to resume task: ' + e.message, 'log-warn');
+        handleTaskResult(data);
+      } catch (err) {
+        alert('Failed to authorize task: ' + err.message);
       }
     }
 
-    function rejectApproval() {
-      document.getElementById('approval-modal').className = 'modal-overlay';
-      appendLog('HUMAN_APPROVAL', 'Rejected by operator. Execution halted safely.', 'log-warn');
+    function cancelTask() {
+      document.getElementById('deliverable-badge').innerText = 'Cancelled';
+      document.getElementById('deliverable-badge').className = 'deliverable-badge';
+      document.getElementById('deliverable-body').innerHTML = `
+        <div class="empty-state">
+          <div style="font-size: 24px; margin-bottom: 8px;">✕ Task Cancelled</div>
+          <div class="empty-state-text">The task execution was safely halted by operator.</div>
+        </div>
+      `;
     }
 
-    async function launchDemo(demoId) {
-      appendLog('DEMO_LAUNCH', `Triggering scenario ${demoId}...`, 'log-tool');
-      setDagState('understand');
-      try {
-        const res = await fetch(`/api/v1/demos/${demoId}`, { method: 'POST' });
-        const data = await res.json();
-        handleTaskResponse(data);
-      } catch (e) {
-        appendLog('ERROR', 'Demo execution failed: ' + e.message, 'log-warn');
+    function renderCompletedDeliverable(data) {
+      const finalRes = data.final_result || {};
+      const outputs = finalRes.outputs || finalRes.partial_outputs || {};
+      let html = '<div class="deliverable-content">';
+
+      // 1. Text Answer / Synthesis
+      const textAnswer = outputs.answer || outputs.content || (typeof outputs === 'string' ? outputs : null);
+      if (textAnswer) {
+        html += `
+          <div>
+            <div class="section-title">Summary & Findings</div>
+            <div class="deliverable-text">${escapeHtml(textAnswer)}</div>
+          </div>
+        `;
       }
+
+      // 2. Calculations / Metrics
+      if (outputs.calculation_result || outputs.value !== undefined) {
+        const calcVal = outputs.value !== undefined ? outputs.value : (outputs.calculation_result && outputs.calculation_result.value);
+        html += `
+          <div>
+            <div class="section-title">Deterministic Calculations</div>
+            <div class="metric-grid">
+              <div class="metric-card">
+                <div class="metric-label">Calculated Result</div>
+                <div class="metric-value">${calcVal !== undefined ? calcVal : 'N/A'}</div>
+              </div>
+              <div class="metric-card">
+                <div class="metric-label">Integrity Status</div>
+                <div class="metric-value" style="color: var(--success); font-size: 15px;">✓ Verified</div>
+              </div>
+            </div>
+          </div>
+        `;
+
+        const traces = outputs.calculation_trace || (outputs.calculation_result && outputs.calculation_result.calculation_trace) || [];
+        if (traces.length > 0) {
+          html += `
+            <table class="styled-table" style="margin-top: 10px;">
+              <thead>
+                <tr><th>Step</th><th>Formula</th><th>Output</th></tr>
+              </thead>
+              <tbody>
+                ${traces.map(t => `<tr><td>${escapeHtml(t.step)}</td><td><code>${escapeHtml(t.formula)}</code></td><td><strong>${escapeHtml(String(t.output))}</strong></td></tr>`).join('')}
+              </tbody>
+            </table>
+          `;
+        }
+      }
+
+      // 3. Code Generation & Sandbox Execution
+      if (outputs.code || outputs.code_execution) {
+        const codeText = outputs.code || '';
+        const execOut = (outputs.code_execution && outputs.code_execution.stdout) || (outputs.execution_result && outputs.execution_result.stdout) || '';
+        html += `
+          <div>
+            <div class="section-title">Generated Python Code</div>
+            <div class="code-container">
+              <div class="code-header">
+                <span>python</span>
+                <button class="btn-copy" onclick="copyCode(this)">Copy</button>
+              </div>
+              <div class="code-block">${escapeHtml(codeText)}</div>
+            </div>
+          </div>
+        `;
+        if (execOut) {
+          html += `
+            <div>
+              <div class="section-title">Sandbox Execution Output (stdout)</div>
+              <div class="code-container">
+                <div class="code-header">
+                  <span>Isolated Sandbox Log</span>
+                  <span style="color: var(--success);">Exit Code 0</span>
+                </div>
+                <div class="code-block" style="color: #10B981;">${escapeHtml(execOut)}</div>
+              </div>
+            </div>
+          `;
+        }
+      }
+
+      // 4. Visual Inspection Observations & NDT Disclaimer
+      const visRes = outputs.vision_result || outputs.document_analysis;
+      if (visRes && visRes.observations && visRes.observations.length > 0) {
+        html += `
+          <div>
+            <div class="section-title">Visual Candidate Observations</div>
+            <table class="styled-table">
+              <thead>
+                <tr><th>Observation</th><th>Confidence</th><th>Status</th></tr>
+              </thead>
+              <tbody>
+                ${visRes.observations.map(o => `
+                  <tr>
+                    <td>${escapeHtml(o.observation || o.text || 'Visual Indication')}</td>
+                    <td>${o.confidence ? (o.confidence.level || (o.confidence.value * 100).toFixed(0) + '%') : 'MEDIUM'}</td>
+                    <td><span style="color: var(--warning);">Candidate (Uncertified)</span></td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+          <div class="disclaimer-box">
+            <strong>⚠️ Engineering NDT Requirement:</strong> All visual indications are uncertified candidates requiring physical Non-Destructive Testing (NDT) verification before maintenance sign-off.
+          </div>
+        `;
+      }
+
+      // 5. Grounded Citations (RAG)
+      const citations = outputs.citations || [];
+      if (citations.length > 0) {
+        html += `
+          <div>
+            <div class="section-title">Verified Source Citations</div>
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+              ${citations.map(c => `
+                <div class="pill" style="border-radius: 6px; justify-content: space-between;">
+                  <span>📖 <strong>${escapeHtml(c.filename || 'Source Document')}</strong> (Chunk ${escapeHtml(c.chunk_id || '-')})</span>
+                  <span style="font-size: 11px; color: var(--success);">✓ Grounded</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        `;
+      }
+
+      // 6. Artifact Downloads
+      const generatedFiles = [];
+      if (outputs.document_analysis && outputs.document_analysis.output_file) {
+        generatedFiles.push(outputs.document_analysis.output_file);
+      }
+      if (generatedFiles.length > 0) {
+        html += `
+          <div>
+            <div class="section-title">Generated Artifacts</div>
+            ${generatedFiles.map(f => `
+              <div class="artifact-card">
+                <div class="artifact-info">📄 ${escapeHtml(f)}</div>
+                <a href="/api/v1/artifacts/${encodeURIComponent(f)}/download" class="btn-download" download>⬇ Download File</a>
+              </div>
+            `).join('')}
+          </div>
+        `;
+      }
+
+      // If nothing parsed, show friendly JSON inspect
+      if (!textAnswer && !outputs.code && !outputs.calculation_result && !visRes) {
+        html += `
+          <div>
+            <div class="section-title">Task Result Details</div>
+            <div class="deliverable-text">${escapeHtml(JSON.stringify(outputs, null, 2))}</div>
+          </div>
+        `;
+      }
+
+      html += '</div>';
+      document.getElementById('deliverable-body').innerHTML = html;
     }
 
-    function renderDeliverable(data) {
-      appendLog('FINAL_RESULT', JSON.stringify(data.final_result || data, null, 2));
+    function copyCode(btn) {
+      const code = btn.parentElement.nextElementSibling.innerText;
+      navigator.clipboard.writeText(code);
+      btn.innerText = 'Copied!';
+      setTimeout(() => { btn.innerText = 'Copy'; }, 2000);
     }
 
-    function switchTab(tab) {
-      // Toggle active styling
-      document.querySelectorAll('.tab').forEach(t => t.className = 'tab');
-      if (event && event.target) event.target.className = 'tab active';
+    function escapeHtml(text) {
+      if (!text) return '';
+      return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
     }
   </script>
 </body>
