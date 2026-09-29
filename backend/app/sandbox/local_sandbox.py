@@ -254,6 +254,17 @@ class LocalProcessSandbox(BaseSandbox):
         post_files = self._snapshot_files()
         created_files = sorted(list((post_files - initial_files) - {harness_filename}))
 
+        # Copy created artifacts to central artifacts cache
+        if created_files and os.path.exists(self._workspace_path):
+            artifacts_dir = os.path.abspath(
+                os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "cache", "artifacts")
+            )
+            os.makedirs(artifacts_dir, exist_ok=True)
+            for cf in created_files:
+                src = os.path.join(self._workspace_path, cf)
+                if os.path.isfile(src):
+                    shutil.copy2(src, os.path.join(artifacts_dir, cf))
+
         result = CodeExecutionResult(
             task_id=request.task_id,
             sandbox_id=self._sandbox_id,

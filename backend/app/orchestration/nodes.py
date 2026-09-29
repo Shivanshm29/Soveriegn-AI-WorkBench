@@ -1,5 +1,6 @@
 """LangGraph nodes for workbench orchestration lifecycle."""
 
+import os
 import logging
 import re
 import uuid
@@ -122,6 +123,19 @@ class OrchestrationNodes:
         )
 
         try:
+            # 1. Resolve attached file path and extension
+            file_p = (
+                new_state.get("file_path")
+                or (new_state.get("metadata") or {}).get("file_path")
+                or new_state.get("image_path")
+                or (new_state.get("metadata") or {}).get("image_path")
+                or (new_state.get("metadata") or {}).get("csv_path")
+                or new_state.get("csv_path")
+            )
+            file_ext = os.path.splitext(file_p)[1].lower() if file_p else ""
+            req_lower = new_state.get("user_request", "").lower()
+
+            understanding = None
             if new_state.get("metadata", {}).get("required_capabilities"):
                 req_caps = new_state["metadata"]["required_capabilities"]
                 understanding = TaskUnderstanding(
@@ -131,8 +145,88 @@ class OrchestrationNodes:
                     complexity="MEDIUM" if "code_execution" in req_caps else "LOW",
                     output_type="analysis",
                 )
-            understanding = None
-            if self.model_runtime is not None:
+
+            # If an attached file is present, classify based on actual file type
+            if understanding is None:
+                is_mixed = (
+                    any(k in req_lower for k in ("inspection", "report", "scanned"))
+                    and any(k in req_lower for k in ("maintenance", "procedure", "px-417", "pump"))
+                    and any(k in req_lower for k in ("calculate", "measurement", "data"))
+                    and any(k in req_lower for k in ("approval", "note", "docx"))
+                )
+                if is_mixed:
+                    understanding = TaskUnderstanding(
+                        intent="Mixed end-to-end industrial inspection and procedure workflow",
+                        capabilities=["visual_reasoning", "knowledge_search", "calculation", "document_generation"],
+                        modalities=["image", "text"],
+                        complexity="HIGH",
+                        output_type="report",
+                    )
+                elif file_ext:
+                    if file_ext in (".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".webp"):
+                        understanding = TaskUnderstanding(
+                            intent=f"Analyze industrial image ({os.path.basename(file_p)})",
+                            capabilities=["visual_reasoning", "reasoning"],
+                            modalities=["image", "text"],
+                            complexity="MEDIUM",
+                            output_type="inspection_report",
+                        )
+                    elif file_ext in (".pdf", ".docx", ".doc", ".txt", ".pptx"):
+                        understanding = TaskUnderstanding(
+                            intent=f"Process attached document ({os.path.basename(file_p)})",
+                            capabilities=["document_extraction", "structured_reasoning"],
+                            modalities=["text"],
+                            complexity="MEDIUM",
+                            output_type="summary" if any(k in req_lower for k in ("summar", "brief", "key", "outline")) else "analysis",
+                        )
+                    elif file_ext in (".csv", ".xlsx", ".tsv"):
+                        if any(k in req_lower for k in ("python", "script", "sandbox", "code", "write code", "run code")):
+                            understanding = TaskUnderstanding(
+                                intent=f"Write and execute Python script on tabular dataset ({os.path.basename(file_p)})",
+                                capabilities=["code_generation", "code_execution"],
+                                modalities=["text"],
+                                complexity="MEDIUM",
+                                output_type="code",
+                            )
+                        else:
+                            understanding = TaskUnderstanding(
+                                intent=f"Analyze tabular dataset ({os.path.basename(file_p)})",
+                                capabilities=["data_analysis", "calculation"],
+                                modalities=["text"],
+                                complexity="LOW",
+                                output_type="calculation_trace",
+                            )
+                elif any(k in req_lower for k in ("word document", "word doc", "create docx", "generate docx", "create a document", "generate a document", "docx document")):
+                    understanding = TaskUnderstanding(
+                        intent="Generate Word document deliverable via Python sandbox execution",
+                        capabilities=["code_generation", "code_execution"],
+                        modalities=["text"],
+                        complexity="MEDIUM",
+                        output_type="document",
+                    )
+                elif any(k in req_lower for k in ("approval note", "approval-note")) or (any(k in req_lower for k in ("scanned", "report", "turbine", "flange")) and any(k in req_lower for k in ("approval", "note"))):
+                    understanding = TaskUnderstanding(
+                        intent="Generate inspection approval note from visual observations",
+                        capabilities=["visual_reasoning", "document_generation"],
+                        modalities=["image", "text"],
+                        complexity="MEDIUM",
+                        output_type="document",
+                    )
+                elif any(k in req_lower for k in ("sandbox", "code", "script", "python", "program", "fibonacci", "function", "run code")):
+                    if any(k in req_lower for k in ("only write", "do not run", "just generate")):
+                        caps = ["code_generation"]
+                    else:
+                        caps = ["code_generation", "code_execution"]
+                    understanding = TaskUnderstanding(
+                        intent="Execute coding agent workflow in local sandbox",
+                        capabilities=caps,
+                        modalities=["text"],
+                        complexity="MEDIUM",
+                        output_type="code",
+                    )
+
+            # If still None, try dynamic model understanding
+            if understanding is None and self.model_runtime is not None:
                 try:
                     understanding = understand_task(
                         new_state["user_request"],
@@ -143,46 +237,19 @@ class OrchestrationNodes:
                     logger.warning("Dynamic model understanding failed (%s); falling back to deterministic parser.", ex)
                     understanding = None
 
+            # Deterministic fallback when no file and no model understanding
             if understanding is None:
-                # Deterministic fallback when runtime is not passed or model call fails
-                req_lower = new_state.get("user_request", "").lower()
-                has_image = bool(
-                    new_state.get("image_path")
-                    or new_state.get("file_path")
-                    or (new_state.get("metadata") or {}).get("image_path")
-                    or (new_state.get("metadata") or {}).get("file_path")
-                )
-                is_mixed = (
-                    any(k in req_lower for k in ("inspection", "report", "scanned"))
-                    and any(k in req_lower for k in ("maintenance", "procedure", "px-417", "pump"))
-                    and any(k in req_lower for k in ("calculate", "measurement", "data"))
-                    and any(k in req_lower for k in ("approval", "note", "docx"))
-                )
-                if is_mixed:
-                    caps = ["visual_reasoning", "knowledge_search", "calculation", "document_generation"]
-                    comp = "HIGH"
-                elif ("inspection" in req_lower or "scanned" in req_lower or has_image) and ("approval note" in req_lower or "docx" in req_lower or "approval" in req_lower):
-                    caps = ["visual_reasoning", "document_generation"]
-                    comp = "MEDIUM"
-                elif any(k in req_lower for k in ("sandbox", "code", "script", "python", "program")):
-                    if any(k in req_lower for k in ("write", "generate", "create", "prepare")) and any(k in req_lower for k in ("sandbox", "run", "execute")):
-                        caps = ["code_generation", "code_execution"]
-                    elif any(k in req_lower for k in ("write", "generate", "create")):
-                        caps = ["code_generation"]
-                    else:
-                        caps = ["code_execution"]
-                    comp = "MEDIUM"
-                elif any(k in req_lower for k in ("calculate", "calculation", "mean", "average", "statistics", "arithmetic", "formula")) or bool(re.search(r"\bsum\b", req_lower)):
+                if any(k in req_lower for k in ("calculate", "calculation", "mean", "average", "statistics", "arithmetic", "formula")) or bool(re.search(r"\bsum\b", req_lower)):
                     caps = ["calculation"]
                     comp = "LOW"
                 elif any(k in req_lower for k in ("csv", "xlsx", "spreadsheet", "excel", "dataset")):
                     caps = ["data_analysis"]
                     comp = "LOW"
-                elif has_image or any(k in req_lower for k in ("visual", "image", "drawing", "dimension", "blueprint", "diagram", "turbine casing", "flange", "defect")):
+                elif any(k in req_lower for k in ("visual", "image", "drawing", "dimension", "blueprint", "diagram", "turbine casing", "flange", "defect")):
                     caps = ["visual_reasoning"]
                     comp = "MEDIUM"
-                elif any(k in req_lower for k in ("search", "retrieve", "knowledge", "px-417", "pump", "manual", "sop", "finding", "recommend")):
-                    caps = ["knowledge_search"]
+                elif any(k in req_lower for k in ("px-417", "pump", "sop-px417")):
+                    caps = ["knowledge_search", "reasoning"]
                     comp = "MEDIUM"
                 else:
                     caps = ["reasoning"]
@@ -761,6 +828,15 @@ class OrchestrationNodes:
             if s.get("status") == "COMPLETED" and s.get("outputs"):
                 outputs.update(s["outputs"])
 
+        # Guard against INSUFFICIENT_EVIDENCE wiping out actual synthesized answers
+        ans = outputs.get("answer")
+        content = outputs.get("content")
+        if ans in ("INSUFFICIENT_EVIDENCE", "Insufficient evidence in the indexed knowledge base.", None, ""):
+            if content and content not in ("INSUFFICIENT_EVIDENCE", "Insufficient evidence in the indexed knowledge base."):
+                outputs["answer"] = content
+        elif not content and ans:
+            outputs["content"] = ans
+
         if new_state.get("task_status") == TaskStatus.WAITING_APPROVAL.value:
             new_state["final_result"] = {
                 "status": "WAITING_APPROVAL",
@@ -788,6 +864,7 @@ class OrchestrationNodes:
             new_state["task_status"] = TaskStatus.COMPLETED.value
             new_state["final_result"] = {
                 "status": "COMPLETED",
+                "summary": ans or content or "",
                 "outputs": outputs,
                 "step_count": len(new_state.get("execution_steps", [])),
             }

@@ -22,12 +22,16 @@ class SandboxManager:
         self,
         base_dir: Optional[str] = None,
         default_config: Optional[SandboxConfig] = None,
-        prefer_docker: bool = False,
+        prefer_docker: bool = True,
     ):
         self._base_dir = base_dir
         self._default_config = default_config or SandboxConfig()
         self._prefer_docker = prefer_docker
         self._active_sandboxes: Dict[str, BaseSandbox] = {}
+
+    @property
+    def is_docker_available(self) -> bool:
+        return DockerSandbox.is_docker_available()
 
     def create_sandbox(
         self,
@@ -84,5 +88,5 @@ def get_sandbox_manager() -> SandboxManager:
     """Retrieve or initialize the global SandboxManager."""
     global _default_sandbox_manager
     if _default_sandbox_manager is None:
-        _default_sandbox_manager = SandboxManager()
+        _default_sandbox_manager = SandboxManager(prefer_docker=True)
     return _default_sandbox_manager

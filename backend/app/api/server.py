@@ -82,6 +82,8 @@ class ApprovalPayload(BaseModel):
 @app.get("/api/v1/sovereignty/status")
 def get_sovereignty_status():
     """Return central zero-egress sovereignty status."""
+    from backend.app.sandbox.docker_sandbox import DockerSandbox
+    docker_avail = DockerSandbox.is_docker_available()
     return {
         "sovereign_mode": True,
         "zero_egress_enforced": True,
@@ -90,6 +92,8 @@ def get_sovereignty_status():
         "cloud_telemetry_disabled": True,
         "cloud_api_disabled": True,
         "active_runtime_endpoint": local_runtime.base_url if local_runtime else "Local Subprocess",
+        "sandbox_backend": "Docker (sovereign-sandbox:latest)" if docker_avail else "Local Process",
+        "sandbox_docker_connected": docker_avail,
     }
 
 
@@ -191,6 +195,24 @@ def get_task_events(task_id: str):
     return [e.model_dump() for e in events]
 
 
+@app.delete("/api/v1/tasks")
+def delete_all_tasks():
+    """Clear all stored chat and task history."""
+    if hasattr(state_store, "clear"):
+        state_store.clear()
+    else:
+        for t in state_store.list_tasks():
+            state_store.delete_task(t.task_id)
+    return {"status": "SUCCESS", "message": "All stored chats and tasks deleted."}
+
+
+@app.delete("/api/v1/tasks/{task_id}")
+def delete_task_by_id(task_id: str):
+    """Delete a single task and its event log."""
+    deleted = state_store.delete_task(task_id)
+    return {"status": "SUCCESS" if deleted else "NOT_FOUND", "deleted": deleted}
+
+
 @app.post("/api/v1/tasks")
 def create_task(payload: TaskRequestPayload):
     """Submit a task to the Sovereign Workbench."""
@@ -263,18 +285,20 @@ def submit_task_approval(task_id: str, payload: ApprovalPayload):
 def download_artifact(file_name: str):
     """Download verified generated artifact."""
     settings = get_settings()
-    art_dir = Path(settings.DATA_ROOT) / "artifacts"
-    target = art_dir / file_name
-    if not target.exists():
-        # Also check uploads directory
-        target = UPLOAD_DIR / file_name
-    if not target.exists():
-        raise HTTPException(status_code=404, detail="Artifact file not found.")
-    return FileResponse(
-        path=str(target),
-        filename=file_name,
-        media_type="application/octet-stream",
-    )
+    clean_name = os.path.basename(file_name)
+    candidates = [
+        Path(settings.DATA_ROOT) / "cache" / "artifacts" / clean_name,
+        Path(settings.DATA_ROOT) / "artifacts" / clean_name,
+        UPLOAD_DIR / clean_name,
+    ]
+    for target in candidates:
+        if target.exists() and target.is_file():
+            return FileResponse(
+                path=str(target),
+                filename=clean_name,
+                media_type="application/octet-stream",
+            )
+    raise HTTPException(status_code=404, detail="Artifact file not found.")
 
 
 # Background automated endpoints preserved for testing suite
@@ -356,7 +380,7 @@ def index_page():
     return HTMLResponse(content=INDEX_HTML)
 
 
-INDEX_HTML = """<!DOCTYPE html>
+INDEX_HTML = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -541,6 +565,39 @@ INDEX_HTML = """<!DOCTYPE html>
     }
     .btn-new-task:hover {
       background: var(--primary-hover);
+    }
+    .btn-clear-history {
+      background: transparent;
+      color: var(--text-dim);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 5px 10px;
+      font-size: 11px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .btn-clear-history:hover {
+      background: rgba(239, 68, 68, 0.12);
+      color: #EF4444;
+      border-color: rgba(239, 68, 68, 0.3);
+    }
+    .btn-delete-task {
+      background: transparent;
+      border: none;
+      color: var(--text-dim);
+      font-size: 14px;
+      line-height: 1;
+      padding: 2px 5px;
+      cursor: pointer;
+      border-radius: 4px;
+      opacity: 0.5;
+      transition: all 0.15s ease;
+    }
+    .btn-delete-task:hover {
+      opacity: 1;
+      color: #EF4444;
+      background: rgba(239, 68, 68, 0.15);
     }
     .history-search-box input {
       width: 100%;
@@ -982,7 +1039,18 @@ INDEX_HTML = """<!DOCTYPE html>
       border: 1px solid var(--border);
       border-radius: 8px;
       padding: 16px;
-      white-space: pre-wrap;
+    }
+    .deliverable-text p {
+      margin-bottom: 12px;
+    }
+    .deliverable-text p:last-child {
+      margin-bottom: 0;
+    }
+    .deliverable-text ul {
+      margin: 8px 0 12px 20px;
+    }
+    .deliverable-text li {
+      margin-bottom: 4px;
     }
 
     /* Code Display */
@@ -1212,7 +1280,10 @@ INDEX_HTML = """<!DOCTYPE html>
     <div class="history-content">
       <div class="history-header">
         <div class="history-title">Previous Tasks</div>
-        <button type="button" class="btn-new-task" onclick="startNewTask()">+ New Task</button>
+        <div style="display: flex; gap: 6px;">
+          <button type="button" class="btn-clear-history" onclick="clearAllHistory()" title="Clear all stored chats">Clear</button>
+          <button type="button" class="btn-new-task" onclick="startNewTask()">+ New</button>
+        </div>
       </div>
 
       <div class="history-search-box">
@@ -1235,6 +1306,10 @@ INDEX_HTML = """<!DOCTYPE html>
       <div class="pill">
         <span class="dot-green"></span>
         Zero-Egress Isolated (127.0.0.1)
+      </div>
+      <div class="pill" id="sandbox-pill">
+        <span class="dot-green"></span>
+        Docker Sandbox: sovereign-sandbox
       </div>
       <div class="pill" id="gpu-pill">
         NVIDIA GeForce RTX 3050 Laptop GPU
@@ -1382,13 +1457,26 @@ INDEX_HTML = """<!DOCTYPE html>
 
     // Initialize UI
     window.addEventListener('DOMContentLoaded', () => {
-      updateGpuStatus();
+      updateSystemStatus();
       loadTasksHistory();
       loadGlobalAuditLogs();
     });
 
-    // Load GPU status
-    async function updateGpuStatus() {
+    // Load System & Sandbox & GPU status
+    async function updateSystemStatus() {
+      try {
+        const sovRes = await fetch('/api/v1/sovereignty/status');
+        const sovData = await sovRes.json();
+        const sbEl = document.getElementById('sandbox-pill');
+        if (sbEl) {
+          if (sovData.sandbox_docker_connected) {
+            sbEl.innerHTML = `<span class="dot-green"></span> Docker Sandbox: sovereign-sandbox (Isolated)`;
+          } else {
+            sbEl.innerHTML = `<span class="dot-green" style="background:#F59E0B;"></span> Sandbox: Local Process`;
+          }
+        }
+      } catch (e) {}
+
       try {
         const res = await fetch('/api/v1/models');
         const data = await res.json();
@@ -1428,7 +1516,10 @@ INDEX_HTML = """<!DOCTYPE html>
         const statusClass = t.status === 'COMPLETED' ? 'completed' : (t.status === 'WAITING_APPROVAL' ? 'waiting' : '');
         return `
           <div class="history-item ${isActive ? 'active' : ''}" onclick="selectHistoryTask('${t.task_id}')">
-            <div class="history-item-query" title="${escapeHtml(t.instruction)}">${escapeHtml(t.instruction || 'Untitled Task')}</div>
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+              <div class="history-item-query" title="${escapeHtml(t.instruction)}">${escapeHtml(t.instruction || 'Untitled Task')}</div>
+              <button type="button" class="btn-delete-task" onclick="event.stopPropagation(); deleteSingleHistoryTask('${t.task_id}')" title="Delete this task">×</button>
+            </div>
             <div class="history-item-meta">
               <span>${timeStr}</span>
               <span class="history-status-tag ${statusClass}">${t.status}</span>
@@ -1436,6 +1527,33 @@ INDEX_HTML = """<!DOCTYPE html>
           </div>
         `;
       }).join('');
+    }
+
+    async function clearAllHistory() {
+      if (!confirm('Are you sure you want to delete all stored chats and tasks?')) return;
+      try {
+        await fetch('/api/v1/tasks', { method: 'DELETE' });
+        allHistoryTasks = [];
+        renderHistoryList([]);
+        startNewTask();
+        loadGlobalAuditLogs();
+      } catch (e) {
+        console.error('Failed to clear history:', e);
+      }
+    }
+
+    async function deleteSingleHistoryTask(taskId) {
+      try {
+        await fetch(`/api/v1/tasks/${taskId}`, { method: 'DELETE' });
+        allHistoryTasks = allHistoryTasks.filter(t => t.task_id !== taskId);
+        renderHistoryList(allHistoryTasks);
+        if (currentTaskId === taskId) {
+          startNewTask();
+        }
+        loadGlobalAuditLogs();
+      } catch (e) {
+        console.error('Failed to delete task:', e);
+      }
     }
 
     function filterHistory(query) {
@@ -1751,16 +1869,45 @@ INDEX_HTML = """<!DOCTYPE html>
         const appReq = data.approval_request || {};
         currentPlanHash = appReq.plan_hash || '';
 
+        let previewCode = '';
+        if (data.final_result && data.final_result.outputs && data.final_result.outputs.code) {
+          previewCode = data.final_result.outputs.code;
+        } else if (data.execution_steps) {
+          for (let step of data.execution_steps) {
+            if (step.output && step.output.code) {
+              previewCode = step.output.code;
+              break;
+            }
+          }
+        }
+
+        let codePreviewHtml = '';
+        if (previewCode) {
+          codePreviewHtml = `
+            <div style="margin: 14px 0; text-align: left;">
+              <div class="section-title">Code Staged For Sandbox Execution</div>
+              <div class="code-container">
+                <div class="code-header">
+                  <span>python &middot; sovereign-sandbox:latest</span>
+                  <button class="btn-copy" onclick="copyCode(this)">Copy</button>
+                </div>
+                <div class="code-block">${escapeHtml(previewCode)}</div>
+              </div>
+            </div>
+          `;
+        }
+
         document.getElementById('deliverable-body').innerHTML = `
           <div class="approval-banner">
             <div class="approval-title">
-              <span>⚠️</span> Human Authorization Required
+              <span>⚠️</span> Industrial Safety Approval Required
             </div>
             <div class="approval-text">
-              The workbench prepared Python code to execute in the local isolated sandbox. As an industrial safety safeguard, explicit human authorization is required before execution.
+              The workbench generated code for this task. As an industrial safety safeguard, explicit human authorization is required before execution in the isolated Docker container (<code>sovereign-sandbox:latest</code> with zero-egress network isolation).
             </div>
+            ${codePreviewHtml}
             <div class="approval-buttons">
-              <button class="btn-approve" onclick="grantTaskApproval()">✓ Authorize & Run Execution</button>
+              <button class="btn-approve" onclick="grantTaskApproval()">✓ Authorize & Run in Sandbox</button>
               <button class="btn-reject" onclick="cancelTask()">✕ Cancel Task</button>
             </div>
           </div>
@@ -1780,9 +1927,9 @@ INDEX_HTML = """<!DOCTYPE html>
     async function grantTaskApproval() {
       document.getElementById('deliverable-body').innerHTML = `
         <div class="empty-state">
-          <div style="font-size: 28px; margin-bottom: 12px;">⚙️</div>
-          <div style="font-weight: 600; color: var(--text); margin-bottom: 6px;">Resuming Task in Local Sandbox</div>
-          <div class="empty-state-text">Executing authorized code in zero-network process sandbox...</div>
+          <div style="font-size: 28px; margin-bottom: 12px;">🐳</div>
+          <div style="font-weight: 600; color: var(--text); margin-bottom: 6px;">Executing in Docker Sandbox</div>
+          <div class="empty-state-text">Running code inside sovereign-sandbox:latest with zero-network isolation...</div>
         </div>
       `;
       updateStepProgress('execute');
@@ -1819,18 +1966,70 @@ INDEX_HTML = """<!DOCTYPE html>
       `;
     }
 
+    function formatMarkdown(text) {
+      if (!text) return '';
+      let escaped = escapeHtml(text);
+
+      // Parse markdown tables: | Col1 | Col2 |\n|---|---|\n| Val1 | Val2 |
+      escaped = escaped.replace(/(?:^|\n)((?:\|[^\n]+\|\r?\n)+)/g, function(match, tableBlock) {
+        const lines = tableBlock.trim().split(/\r?\n/);
+        if (lines.length < 2) return match;
+        let tblHtml = '<table class="styled-table" style="margin: 14px 0;">';
+        let isHeader = true;
+        for (let line of lines) {
+          if (/^\|[-:\s|]+\|$/.test(line.trim())) {
+            isHeader = false;
+            continue;
+          }
+          const cells = line.split('|').slice(1, -1);
+          tblHtml += '<tr>';
+          for (let cell of cells) {
+            const tag = isHeader ? 'th' : 'td';
+            tblHtml += `<${tag}>${cell.trim()}</${tag}>`;
+          }
+          tblHtml += '</tr>';
+          if (isHeader) isHeader = false;
+        }
+        tblHtml += '</table>';
+        return tblHtml;
+      });
+
+      // Headers
+      escaped = escaped.replace(/^### (.*$)/gim, '<h4 style="margin: 14px 0 6px 0; color: #60A5FA; font-size: 15px;">$1</h4>');
+      escaped = escaped.replace(/^## (.*$)/gim, '<h3 style="margin: 16px 0 8px 0; color: #93C5FD; font-size: 16px;">$1</h3>');
+      escaped = escaped.replace(/^# (.*$)/gim, '<h2 style="margin: 18px 0 10px 0; color: #BFDBFE; font-size: 18px;">$1</h2>');
+
+      // Bold and italic
+      escaped = escaped.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+      escaped = escaped.replace(/\*(.*?)\*/g, '<em>$1</em>');
+      escaped = escaped.replace(/`([^`]+)`/g, '<code style="background: rgba(255,255,255,0.08); padding: 2px 5px; border-radius: 4px; font-family: monospace;">$1</code>');
+
+      // Unordered list items
+      escaped = escaped.replace(/^\s*[-*]\s+(.*$)/gim, '<li style="margin-left: 20px; margin-bottom: 4px;">$1</li>');
+
+      // Paragraphs
+      const paragraphs = escaped.split(/\n\n+/);
+      return paragraphs.map(p => {
+        p = p.trim();
+        if (p.startsWith('<table') || p.startsWith('<h') || p.startsWith('<li')) {
+          return p.replace(/<li.*<\/li>/s, '<ul style="margin: 8px 0 12px 0;">$&</ul>');
+        }
+        return `<p style="margin-bottom: 12px; line-height: 1.6;">${p.replace(/\n/g, '<br>')}</p>`;
+      }).join('');
+    }
+
     function renderCompletedDeliverable(data) {
       const finalRes = data.final_result || {};
       const outputs = finalRes.outputs || finalRes.partial_outputs || {};
       let html = '<div class="deliverable-content">';
 
       // 1. Text Answer / Synthesis
-      const textAnswer = outputs.answer || outputs.content || (typeof outputs === 'string' ? outputs : null);
+      const textAnswer = outputs.answer || outputs.content || outputs.summary || (typeof outputs === 'string' ? outputs : null);
       if (textAnswer) {
         html += `
           <div>
             <div class="section-title">Summary & Findings</div>
-            <div class="deliverable-text">${escapeHtml(textAnswer)}</div>
+            <div class="deliverable-text">${formatMarkdown(textAnswer)}</div>
           </div>
         `;
       }
@@ -1948,19 +2147,49 @@ INDEX_HTML = """<!DOCTYPE html>
 
       // 6. Artifact Downloads
       const generatedFiles = [];
+      const addFile = (val) => {
+        if (!val || typeof val !== 'string') return;
+        const base = val.split(/[\\/]/).pop();
+        if (base && !generatedFiles.includes(base)) generatedFiles.push(base);
+      };
+
       if (outputs.document_analysis && outputs.document_analysis.output_file) {
-        generatedFiles.push(outputs.document_analysis.output_file);
+        addFile(outputs.document_analysis.output_file);
       }
+      if (outputs.artifact) {
+        addFile(outputs.artifact.file_name || outputs.artifact.filename || outputs.artifact.file_path);
+      }
+      if (Array.isArray(outputs.artifacts)) {
+        outputs.artifacts.forEach(addFile);
+      }
+      if (outputs.code_execution && Array.isArray(outputs.code_execution.files_created)) {
+        outputs.code_execution.files_created.forEach(addFile);
+      }
+      if (outputs.execution_result && Array.isArray(outputs.execution_result.files_created)) {
+        outputs.execution_result.files_created.forEach(addFile);
+      }
+      if (outputs.file_path) {
+        addFile(outputs.file_path);
+      }
+
       if (generatedFiles.length > 0) {
         html += `
           <div>
-            <div class="section-title">Generated Artifacts</div>
-            ${generatedFiles.map(f => `
-              <div class="artifact-card">
-                <div class="artifact-info">📄 ${escapeHtml(f)}</div>
-                <a href="/api/v1/artifacts/${encodeURIComponent(f)}/download" class="btn-download" download>⬇ Download File</a>
-              </div>
-            `).join('')}
+            <div class="section-title">Generated Artifacts & Downloadable Deliverables</div>
+            ${generatedFiles.map(f => {
+              let icon = '📄';
+              let ext = f.split('.').pop().toLowerCase();
+              if (ext === 'docx' || ext === 'doc') icon = '📝';
+              else if (ext === 'xlsx' || ext === 'csv') icon = '📊';
+              else if (ext === 'pdf') icon = '📑';
+              else if (ext === 'png' || ext === 'jpg' || ext === 'jpeg') icon = '🖼️';
+              return `
+                <div class="artifact-card">
+                  <div class="artifact-info">${icon} <strong>${escapeHtml(f)}</strong> <span style="font-size: 11px; color: var(--success); margin-left: 8px;">✓ Verified Artifact</span></div>
+                  <a href="/api/v1/artifacts/${encodeURIComponent(f)}/download" class="btn-download" download>⬇ Download ${escapeHtml(ext.toUpperCase())}</a>
+                </div>
+              `;
+            }).join('')}
           </div>
         `;
       }

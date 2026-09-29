@@ -26,7 +26,7 @@ from backend.app.sandbox.verifier import CodeExecutionVerifier
 class DockerSandbox(BaseSandbox):
     """Docker-based execution sandbox enforcing --network none and container cgroup limits."""
 
-    IMAGE_NAME = "python:3.11-slim"
+    IMAGE_NAME = "sovereign-sandbox:latest"
 
     def __init__(
         self,
@@ -112,6 +112,9 @@ class DockerSandbox(BaseSandbox):
         script_name = "main.py"
         self.write_file(script_name, request.code)
 
+        # Snapshot initial files
+        initial_files = set(os.listdir(self._workspace_path)) if os.path.exists(self._workspace_path) else set()
+
         # 3. Assemble docker command with strict isolation
         docker_cmd = [
             "docker",
@@ -157,6 +160,20 @@ class DockerSandbox(BaseSandbox):
 
         duration_ms = (time.perf_counter() - start_time) * 1000.0
 
+        # Collect created files and save to central artifacts cache
+        created_files: List[str] = []
+        if os.path.exists(self._workspace_path):
+            artifacts_dir = os.path.abspath(
+                os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "cache", "artifacts")
+            )
+            os.makedirs(artifacts_dir, exist_ok=True)
+            for f_name in os.listdir(self._workspace_path):
+                if f_name not in initial_files and f_name != script_name:
+                    created_files.append(f_name)
+                    src = os.path.join(self._workspace_path, f_name)
+                    if os.path.isfile(src):
+                        shutil.copy2(src, os.path.join(artifacts_dir, f_name))
+
         result = CodeExecutionResult(
             task_id=request.task_id,
             sandbox_id=self._sandbox_id,
@@ -170,6 +187,8 @@ class DockerSandbox(BaseSandbox):
                 output_bytes=len(stdout) + len(stderr),
             ),
             network_blocked=True,
+            files_created=created_files,
+            files_modified=[],
             error=error_msg,
         )
 

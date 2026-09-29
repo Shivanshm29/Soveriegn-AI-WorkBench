@@ -135,7 +135,8 @@ class CodingAgent:
             if context:
                 prompt += f"Context/Inputs: {context}\n"
             prompt += (
-                "Write clean, executable Python code solving this task.\n"
+                "Write clean, complete, executable Python code solving this task.\n"
+                "CRITICAL: Include ALL necessary imports at the top (for Word documents always write 'from docx import Document', for Excel 'import openpyxl', for tables 'import pandas as pd', etc.).\n"
                 "Return ONLY the executable Python code inside ```python ``` fences."
             )
             try:
@@ -347,7 +348,64 @@ class CodingAgent:
             except Exception:
                 pass
 
-        # Fallback repair logic for common errors (e.g. division by zero, missing file, syntax)
+        # Fallback repair logic for common errors (e.g. missing imports, division by zero, syntax)
+        if "name 'Document' is not defined" in err_msg:
+            return CodeRepairResult(
+                task_id=execution_result.task_id,
+                repaired_code="from docx import Document\n" + original_code,
+                original_code=original_code,
+                changes_made="Added missing 'from docx import Document' import",
+                strategy="Deterministic import injection",
+            )
+        if "name 'pd' is not defined" in err_msg:
+            return CodeRepairResult(
+                task_id=execution_result.task_id,
+                repaired_code="import pandas as pd\n" + original_code,
+                original_code=original_code,
+                changes_made="Added missing 'import pandas as pd' import",
+                strategy="Deterministic import injection",
+            )
+        if "name 'np' is not defined" in err_msg:
+            return CodeRepairResult(
+                task_id=execution_result.task_id,
+                repaired_code="import numpy as np\n" + original_code,
+                original_code=original_code,
+                changes_made="Added missing 'import numpy as np' import",
+                strategy="Deterministic import injection",
+            )
+        if "name 'openpyxl' is not defined" in err_msg or "name 'Workbook' is not defined" in err_msg:
+            return CodeRepairResult(
+                task_id=execution_result.task_id,
+                repaired_code="import openpyxl\nfrom openpyxl import Workbook\n" + original_code,
+                original_code=original_code,
+                changes_made="Added missing openpyxl imports",
+                strategy="Deterministic import injection",
+            )
+        if "name 'csv' is not defined" in err_msg:
+            return CodeRepairResult(
+                task_id=execution_result.task_id,
+                repaired_code="import csv\n" + original_code,
+                original_code=original_code,
+                changes_made="Added missing 'import csv' import",
+                strategy="Deterministic import injection",
+            )
+        if "name 'json' is not defined" in err_msg:
+            return CodeRepairResult(
+                task_id=execution_result.task_id,
+                repaired_code="import json\n" + original_code,
+                original_code=original_code,
+                changes_made="Added missing 'import json' import",
+                strategy="Deterministic import injection",
+            )
+        if "name 'math' is not defined" in err_msg:
+            return CodeRepairResult(
+                task_id=execution_result.task_id,
+                repaired_code="import math\n" + original_code,
+                original_code=original_code,
+                changes_made="Added missing 'import math' import",
+                strategy="Deterministic import injection",
+            )
+
         repaired_lines = []
         for line in original_code.splitlines():
             if "/ 0" in line:

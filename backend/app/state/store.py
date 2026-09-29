@@ -274,6 +274,7 @@ class InMemoryStateStore(StateStore):
         return list(self._events.get(task_id, []))
 
     def clear(self) -> None:
+        """Clear all stored tasks and events."""
         self._tasks.clear()
         self._events.clear()
 

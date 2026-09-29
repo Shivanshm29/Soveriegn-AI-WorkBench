@@ -1,5 +1,6 @@
-"""Local OpenAI-compatible model runtime adapter (e.g., vLLM)."""
-
+import os
+import base64
+import mimetypes
 import json
 from typing import List, Optional, Dict, Any
 import httpx
@@ -85,12 +86,38 @@ class LocalOpenAIRuntime(ModelRuntime):
                     if part.type == "text" and part.text is not None:
                         parts.append({"type": "text", "text": part.text})
                     elif part.type == "image_url" and part.image_url is not None:
-                        parts.append({"type": "image_url", "image_url": part.image_url})
+                        u = part.image_url.get("url", "")
+                        if u.startswith("file://"):
+                            local_p = u[7:]
+                            if os.path.exists(local_p):
+                                mime, _ = mimetypes.guess_type(local_p)
+                                mime = mime or "image/png"
+                                with open(local_p, "rb") as img_f:
+                                    b64 = base64.b64encode(img_f.read()).decode("utf-8")
+                                parts.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
+                            else:
+                                parts.append({"type": "image_url", "image_url": part.image_url})
+                        elif os.path.exists(u):
+                            mime, _ = mimetypes.guess_type(u)
+                            mime = mime or "image/png"
+                            with open(u, "rb") as img_f:
+                                b64 = base64.b64encode(img_f.read()).decode("utf-8")
+                            parts.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
+                        else:
+                            parts.append({"type": "image_url", "image_url": part.image_url})
                     elif part.type == "image_path" and part.image_path is not None:
-                        parts.append({
-                            "type": "image_url",
-                            "image_url": {"url": f"file://{part.image_path}"}
-                        })
+                        local_p = part.image_path
+                        if os.path.exists(local_p):
+                            mime, _ = mimetypes.guess_type(local_p)
+                            mime = mime or "image/png"
+                            with open(local_p, "rb") as img_f:
+                                b64 = base64.b64encode(img_f.read()).decode("utf-8")
+                            parts.append({
+                                "type": "image_url",
+                                "image_url": {"url": f"data:{mime};base64,{b64}"}
+                            })
+                        else:
+                            parts.append({"type": "text", "text": f"[Image file not found: {local_p}]"})
                 entry["content"] = parts
 
             if msg.name:
@@ -134,9 +161,15 @@ class LocalOpenAIRuntime(ModelRuntime):
             "qwen3-small": "qwen2.5:3b",
             "qwen3-vl-small": "qwen3-vl:4b",
             "qwen-coder-small": "qwen2.5-coder:3b",
+            "vision_document": "qwen3-vl:4b",
+            "vision_model": "qwen3-vl:4b",
+            "vision": "qwen3-vl:4b",
+            "qwen3-vl": "qwen3-vl:4b",
         }
         if target_model in alias_map:
             target_model = alias_map[target_model]
+        elif target_model and any(k in target_model.lower() for k in ("vl", "vision")):
+            target_model = "qwen3-vl:4b"
 
         payload: Dict[str, Any] = {
             "model": target_model,
@@ -157,9 +190,9 @@ class LocalOpenAIRuntime(ModelRuntime):
             else:
                 payload["response_format"] = request.response_format
 
-        # Disable Qwen3 "thinking" mode to prevent empty-output errors.
+        # Disable Qwen3 "thinking" mode for vLLM (skip for Ollama where it is unsupported)
         model_lower = (target_model or "").lower()
-        if "qwen3" in model_lower or "qwen2.5" in model_lower:
+        if "11434" not in self.base_url and ("qwen3" in model_lower or "qwen2.5" in model_lower):
             payload["chat_template_kwargs"] = {"enable_thinking": False}
 
         endpoint_url = f"{self.base_url}/chat/completions"
@@ -234,8 +267,13 @@ class LocalOpenAIRuntime(ModelRuntime):
         content = msg.get("content")
         finish_reason = choice.get("finish_reason")
 
-        # Normalise: some servers return empty string instead of None
-        if content == "":
+        # Clean thinking blocks if present and normalise empty string
+        if content:
+            import re
+            cleaned = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+            if cleaned:
+                content = cleaned
+        elif content == "":
             content = None
 
         # Parse tool calls if present
