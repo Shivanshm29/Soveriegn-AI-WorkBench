@@ -1,6 +1,6 @@
 # Sovereign Workbench: Phase Workflow & Execution Architecture
 
-This document specifies the end-to-end workflow derived from [`PHASES.md`](PHASES.md), detailing both the **Phase-by-Phase Implementation Lifecycle (Build Pipeline)** and the **Real-Time Runtime Execution Workflow (What the System Looks Like in Action)**.
+This document specifies the end-to-end workflow detailing both the **Implementation Lifecycle (Build Pipeline)** and the **Real-Time Runtime Execution Workflow (What the System Looks Like in Action)**.
 
 ---
 
