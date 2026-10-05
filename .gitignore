@@ -16,12 +16,7 @@ venv/
 ENV/
 
 # Temporary / scratch / runtime data
-data/tasks/
-data/audit/
-data/cache/
-data/state/
-data/uploads/
-data/artifacts/
+data/
 *.log
 
 # IDE & OS files
