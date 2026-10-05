@@ -440,21 +440,21 @@ try:
     models_ok = "gpu" in models_data and len(models_data.get("models", [])) > 0
     runner.record("Web Server", f"GPU Telemetry API ({models_data.get('gpu', 'Unknown')})", models_ok, duration=time.time() - t0)
 
-    # 10.4 SIH Demo 3: Confidential Knowledge RAG via API
+    # 10.4 Demo 3: Confidential Knowledge RAG via API
     t0 = time.time()
     post_req = urllib.request.Request(f"{SERVER_URL}/api/v1/demos/demo3", method="POST")
     demo3_res = json.loads(urllib.request.urlopen(post_req, timeout=10).read().decode())
     demo3_ok = demo3_res.get("task_status") == "COMPLETED" and len(demo3_res.get("citations", [])) > 0
-    runner.record("Web Server", "SIH Demo 3: Confidential RAG API (POST /api/v1/demos/demo3)", demo3_ok, duration=time.time() - t0)
+    runner.record("Web Server", "Demo 3: Confidential RAG API (POST /api/v1/demos/demo3)", demo3_ok, duration=time.time() - t0)
 
-    # 10.5 SIH Demo 4: Engineering Vision via API
+    # 10.5 Demo 4: Engineering Vision via API
     t0 = time.time()
     post_req = urllib.request.Request(f"{SERVER_URL}/api/v1/demos/demo4", method="POST")
     demo4_res = json.loads(urllib.request.urlopen(post_req, timeout=10).read().decode())
     demo4_ok = demo4_res.get("task_status") == "COMPLETED" and len(demo4_res.get("observations", [])) > 0
-    runner.record("Web Server", "SIH Demo 4: Vision Analysis API (POST /api/v1/demos/demo4)", demo4_ok, duration=time.time() - t0)
+    runner.record("Web Server", "Demo 4: Vision Analysis API (POST /api/v1/demos/demo4)", demo4_ok, duration=time.time() - t0)
 
-    # 10.6 SIH Demo 2: Coding & Sandbox via API with Human Approval
+    # 10.6 Demo 2: Coding & Sandbox via API with Human Approval
     t0 = time.time()
     post_req = urllib.request.Request(f"{SERVER_URL}/api/v1/demos/demo2", method="POST")
     demo2_res = json.loads(urllib.request.urlopen(post_req, timeout=15).read().decode())
@@ -466,7 +466,7 @@ try:
     app_req = urllib.request.Request(f"{SERVER_URL}/api/v1/tasks/{d2_id}/approval", data=app_payload, headers={"Content-Type": "application/json"})
     app_res = json.loads(urllib.request.urlopen(app_req, timeout=15).read().decode())
     demo2_ok = d2_waiting and app_res.get("status") == "COMPLETED"
-    runner.record("Web Server", "SIH Demo 2: Coding, Policy Gate & Approval API", demo2_ok, duration=time.time() - t0)
+    runner.record("Web Server", "Demo 2: Coding, Policy Gate & Approval API", demo2_ok, duration=time.time() - t0)
 
 except Exception as e:
     runner.record("Web Server", "Web Server & REST Endpoints", False, str(e))

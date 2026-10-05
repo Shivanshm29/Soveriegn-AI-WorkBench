@@ -67,19 +67,19 @@ The orchestration engine is structured as a compiled LangGraph `StateGraph`:
 ```
 
 ### Component Structure (`backend/app/orchestration/`)
-- [`__init__.py`](file:///c:/Users/shiva/Desktop/college/sih/sih2/sih-sovereign-workbench-initial/backend/app/orchestration/__init__.py): Central package exports.
-- [`state.py`](file:///c:/Users/shiva/Desktop/college/sih/sih2/sih-sovereign-workbench-initial/backend/app/orchestration/state.py): OrchestrationState definition and bidirectional synchronization with Phase 3 `TaskState`.
-- [`errors.py`](file:///c:/Users/shiva/Desktop/college/sih/sih2/sih-sovereign-workbench-initial/backend/app/orchestration/errors.py): Structured orchestration exception hierarchy.
-- [`understanding.py`](file:///c:/Users/shiva/Desktop/college/sih/sih2/sih-sovereign-workbench-initial/backend/app/orchestration/understanding.py): Intent extraction, capabilities mapping, and Pydantic schema validation.
-- [`routing.py`](file:///c:/Users/shiva/Desktop/college/sih/sih2/sih-sovereign-workbench-initial/backend/app/orchestration/routing.py): Capability-based routing delegating to `AgentRegistry` and `ModelRegistry`.
-- [`planner.py`](file:///c:/Users/shiva/Desktop/college/sih/sih2/sih-sovereign-workbench-initial/backend/app/orchestration/planner.py): Structured DAG plan creation and strict validation against registries.
-- [`policy.py`](file:///c:/Users/shiva/Desktop/college/sih/sih2/sih-sovereign-workbench-initial/backend/app/orchestration/policy.py): Policy checkpoint evaluator representing `allowed`, `blocked`, and `requires_approval`.
-- [`execution.py`](file:///c:/Users/shiva/Desktop/college/sih/sih2/sih-sovereign-workbench-initial/backend/app/orchestration/execution.py): Step execution dispatcher, A2A delegation packaging, and truthful `NOT_IMPLEMENTED` reporting.
-- [`observation.py`](file:///c:/Users/shiva/Desktop/college/sih/sih2/sih-sovereign-workbench-initial/backend/app/orchestration/observation.py): Execution result evaluation and classification (`SUCCESS`, `RECOVERABLE_FAILURE`, `FATAL_FAILURE`).
-- [`verification.py`](file:///c:/Users/shiva/Desktop/college/sih/sih2/sih-sovereign-workbench-initial/backend/app/orchestration/verification.py): Generic output and completion verifier.
-- [`nodes.py`](file:///c:/Users/shiva/Desktop/college/sih/sih2/sih-sovereign-workbench-initial/backend/app/orchestration/nodes.py): LangGraph node handler implementations with dependency injection and state persistence.
-- [`graph.py`](file:///c:/Users/shiva/Desktop/college/sih/sih2/sih-sovereign-workbench-initial/backend/app/orchestration/graph.py): StateGraph compilation and `WorkbenchOrchestrator` lifecycle runner.
-- [`diagnostics.py`](file:///c:/Users/shiva/Desktop/college/sih/sih2/sih-sovereign-workbench-initial/backend/app/orchestration/diagnostics.py): Topology and edge inspector CLI.
+- [`__init__.py`](../backend/app/orchestration/__init__.py): Central package exports.
+- [`state.py`](../backend/app/orchestration/state.py): OrchestrationState definition and bidirectional synchronization with Phase 3 `TaskState`.
+- [`errors.py`](../backend/app/orchestration/errors.py): Structured orchestration exception hierarchy.
+- [`understanding.py`](../backend/app/orchestration/understanding.py): Intent extraction, capabilities mapping, and Pydantic schema validation.
+- [`routing.py`](../backend/app/orchestration/routing.py): Capability-based routing delegating to `AgentRegistry` and `ModelRegistry`.
+- [`planner.py`](../backend/app/orchestration/planner.py): Structured DAG plan creation and strict validation against registries.
+- [`policy.py`](../backend/app/orchestration/policy.py): Policy checkpoint evaluator representing `allowed`, `blocked`, and `requires_approval`.
+- [`execution.py`](../backend/app/orchestration/execution.py): Step execution dispatcher, A2A delegation packaging, and truthful `NOT_IMPLEMENTED` reporting.
+- [`observation.py`](../backend/app/orchestration/observation.py): Execution result evaluation and classification (`SUCCESS`, `RECOVERABLE_FAILURE`, `FATAL_FAILURE`).
+- [`verification.py`](../backend/app/orchestration/verification.py): Generic output and completion verifier.
+- [`nodes.py`](../backend/app/orchestration/nodes.py): LangGraph node handler implementations with dependency injection and state persistence.
+- [`graph.py`](../backend/app/orchestration/graph.py): StateGraph compilation and `WorkbenchOrchestrator` lifecycle runner.
+- [`diagnostics.py`](../backend/app/orchestration/diagnostics.py): Topology and edge inspector CLI.
 
 ---
 

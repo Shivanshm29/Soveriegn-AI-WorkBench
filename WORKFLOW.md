@@ -1,6 +1,6 @@
 # Sovereign Workbench: Phase Workflow & Execution Architecture
 
-This document specifies the end-to-end workflow derived from [`PHASES.md`](file:///c:/Users/shiva/Desktop/college/sih/sih2/sih-sovereign-workbench-initial/PHASES.md), detailing both the **Phase-by-Phase Implementation Lifecycle (Build Pipeline)** and the **Real-Time Runtime Execution Workflow (What the System Looks Like in Action)**.
+This document specifies the end-to-end workflow derived from [`PHASES.md`](PHASES.md), detailing both the **Phase-by-Phase Implementation Lifecycle (Build Pipeline)** and the **Real-Time Runtime Execution Workflow (What the System Looks Like in Action)**.
 
 ---
 
@@ -47,7 +47,7 @@ flowchart TD
     subgraph M5["Milestone 5: Traceability, Hardening & Demos"]
         P12["Phase 12: Interactive Provenance Graph\n(Gate: Output claim → bounding box/region click-through)"]
         P13["Phase 13: Red-Team & Security Hardening\n(Gate: Automated prompt injection & egress battery)"]
-        P14["Phase 14: SIH Grand Demonstration\n(Gate: Demos A, B, C pass on small profile)"]
+        P14["Phase 14: Grand Demonstrations\n(Gate: Demos A, B, C pass on small profile)"]
         P9 --> P12
         P11 --> P12
         P12 --> P13 --> P14
@@ -88,7 +88,7 @@ Every phase follows a rigid development lifecycle: **Implement Components → Ru
 | **P11: Artifact Factory** | Verified output generation | DOCX & XLSX template renderers, file structure validator | Generated DOCX/XLSX is re-opened, schema-validated, and verified before delivery. |
 | **P12: Provenance Graph** | End-to-end evidence graph | Directed Acyclic Graph: Output Claim → Source Doc → Page → Region | Reviewer can click any claim in UI and display matching document crop and tool receipt. |
 | **P13: Red-Team & Tests** | Security & stability proof | Prompt injection suite, egress fuzzing, container breakout tests | 100% of acceptance matrix items (A01–A24) automated and passing. |
-| **P14: SIH Grand Demos** | End-to-end mission delivery | Demos A (Report to DOCX), B (Code Self-Repair), C (Drawing VLM) | All 3 demos run end-to-end on local small model profile (`USE_HIGH_LEVEL_MODELS=false`). |
+| **P14: Grand Demos** | End-to-end mission delivery | Demos A (Report to DOCX), B (Code Self-Repair), C (Drawing VLM) | All 3 demos run end-to-end on local small model profile (`USE_HIGH_LEVEL_MODELS=false`). |
 
 ---
 

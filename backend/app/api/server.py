@@ -99,33 +99,47 @@ def get_sovereignty_status():
 
 @app.get("/api/v1/models")
 def get_models_status():
-    """Return local GPU, VRAM, and loaded Ollama models."""
-    gpu_info = "NVIDIA GeForce RTX 3050 Laptop GPU (6 GB VRAM)"
-    vram_usage = "4.2 GB / 6.0 GB"
-    try:
-        smi = subprocess.check_output(
-            ["nvidia-smi", "--query-gpu=name,memory.used,memory.total", "--format=csv,noheader,nounits"],
-            text=True,
-            timeout=2,
-        )
-        parts = [p.strip() for p in smi.strip().split(",")]
-        if len(parts) >= 3:
-            gpu_info = parts[0]
-            vram_usage = f"{int(parts[1])/1024:.1f} GB / {int(parts[2])/1024:.1f} GB"
-    except Exception:
-        pass
+    """Return dynamically detected local GPU / CPU, memory, and loaded models."""
+    from backend.app.models.hardware import probe_hardware
+    snap = probe_hardware()
 
     models_list = []
     if local_runtime:
         h = local_runtime.health_check()
         models_list = h.models or []
 
+    is_high = getattr(get_settings(), "USE_HIGH_LEVEL_MODELS", False)
+    profile_base = "high" if is_high else "small"
+
+    if snap.gpu_available and snap.gpu_name:
+        gpu_info = snap.gpu_name
+        if snap.gpu_memory_total_gb is not None:
+            if snap.gpu_memory_free_gb is not None:
+                used_gb = max(0.0, snap.gpu_memory_total_gb - snap.gpu_memory_free_gb)
+                vram_usage = f"{used_gb:.1f} GB / {snap.gpu_memory_total_gb:.1f} GB"
+            else:
+                vram_usage = f"{snap.gpu_memory_total_gb:.1f} GB VRAM"
+        else:
+            vram_usage = "Hardware Accelerated"
+        runtime_status = "ONLINE (Local GPU)" if local_runtime else "STANDBY (Local Hardware)"
+        active_profile = f"{profile_base} ({snap.gpu_name})"
+    else:
+        gpu_info = f"CPU Acceleration ({snap.cpu_count} cores, {snap.cpu_architecture})"
+        if snap.ram_total_gb is not None:
+            ram_avail = snap.ram_available_gb or 0.0
+            ram_used = max(0.0, snap.ram_total_gb - ram_avail)
+            vram_usage = f"{ram_used:.1f} GB / {snap.ram_total_gb:.1f} GB RAM"
+        else:
+            vram_usage = "CPU Mode"
+        runtime_status = "ONLINE (Local CPU)" if local_runtime else "STANDBY (CPU Runtime)"
+        active_profile = f"{profile_base} (CPU Mode)"
+
     return {
         "gpu": gpu_info,
         "vram_usage": vram_usage,
-        "runtime_status": "ONLINE (Local GPU)" if local_runtime else "OFFLINE (Mock/Fallback)",
+        "runtime_status": runtime_status,
         "models": models_list,
-        "active_profile": "small (RTX 3050 Optimized)",
+        "active_profile": active_profile,
     }
 
 
@@ -1411,7 +1425,7 @@ INDEX_HTML = r"""<!DOCTYPE html>
         Docker Sandbox
       </div>
       <div class="pill" id="gpu-pill">
-        🖥️ RTX 3050
+        🖥️ Detecting Hardware...
       </div>
     </div>
   </header>

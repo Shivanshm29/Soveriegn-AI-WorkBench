@@ -1,4 +1,4 @@
-"""Authoritative Phase 7 Acceptance and SIH Demo Target Tests.
+"""Authoritative Phase 7 Acceptance and Demo Target Tests.
 
 Verifies all 21 acceptance criteria specified in Phase 7 contracts:
 - Local engineering drawing processing
@@ -34,8 +34,8 @@ from tests.fixtures.vision_fixtures import (
 )
 
 
-def test_sih_demo_target_engineering_and_inspection(tmp_path):
-    """SIH Demo Target (Section 28): Local scanned engineering/inspection material analysis.
+def test_demo_target_engineering_and_inspection(tmp_path):
+    """Demo Target (Section 28): Local scanned engineering/inspection material analysis.
     
     Demonstrates:
     1. Drawing identification & preprocessing

@@ -1,4 +1,4 @@
-# SIH Local Demonstration Plan
+# Local Demonstration Plan
 
 This document provides the exact commands, execution steps, and verification outputs to reproduce the 5 core demonstrations of the **Sovereign On-Premise Agentic AI Workbench** locally.
 
@@ -23,7 +23,7 @@ Demonstrate automated ingestion of an industrial inspection report, local visual
 
 ### Command to Execute
 ```bash
-python -m pytest tests/acceptance/test_phase_9_acceptance.py -k "test_sih_demo_scenario_1" -v -s
+python -m pytest tests/acceptance/test_phase_9_acceptance.py -k "test_demo_scenario_1" -v -s
 ```
 
 ### Key Workflow Steps
@@ -44,7 +44,7 @@ Demonstrate local code generation, policy enforcement on high-risk tools, intera
 
 ### Command to Execute
 ```bash
-python -m pytest tests/acceptance/test_phase_9_acceptance.py -k "test_sih_demo_scenario_2" -v -s
+python -m pytest tests/acceptance/test_phase_9_acceptance.py -k "test_demo_scenario_2" -v -s
 ```
 
 ### Key Workflow Steps
@@ -69,7 +69,7 @@ Demonstrate local hybrid retrieval (Qdrant dense vector search + BM25 lexical ra
 
 ### Command to Execute
 ```bash
-python -m pytest tests/acceptance/test_phase_9_acceptance.py -k "test_sih_demo_scenario_3" -v -s
+python -m pytest tests/acceptance/test_phase_9_acceptance.py -k "test_demo_scenario_3" -v -s
 ```
 
 ### Key Workflow Steps
@@ -90,7 +90,7 @@ Demonstrate visual reasoning on industrial components while preventing model hal
 
 ### Command to Execute
 ```bash
-python -m pytest tests/acceptance/test_phase_9_acceptance.py -k "test_sih_demo_scenario_4" -v -s
+python -m pytest tests/acceptance/test_phase_9_acceptance.py -k "test_demo_scenario_4" -v -s
 ```
 
 ### Key Workflow Steps
@@ -108,7 +108,7 @@ Demonstrate all logical specialists collaborating seamlessly within ONE single L
 
 ### Command to Execute
 ```bash
-python -m pytest tests/acceptance/test_phase_9_acceptance.py -k "test_sih_demo_scenario_5" -v -s
+python -m pytest tests/acceptance/test_phase_9_acceptance.py -k "test_demo_scenario_5" -v -s
 ```
 
 ### Key Workflow Steps

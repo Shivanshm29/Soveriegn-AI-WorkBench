@@ -1,16 +1,16 @@
-"""Authoritative Phase 9 Acceptance Test Suite and SIH Demonstration Scenarios.
+"""Authoritative Phase 9 Acceptance Test Suite and Demonstration Scenarios.
 
-Verifies all SIH Phase 9 requirements:
+Verifies all Phase 9 requirements:
 - Local Coding Agent using ModelRegistry
 - Isolated local sandbox with strict network denial and filesystem containment
 - Local Data/Calculation Agent for deterministic calculations and CSV/XLSX analysis
 - Deterministic calculation and code verification
 - Local artifact generation (DOCX, XLSX) with SHA-256 hashes and evidence provenance
-- SIH Demo Scenario 1: Scanned Inspection Report -> Findings -> Approval -> DOCX
-- SIH Demo Scenario 2: Coding Task -> Policy/Approval -> Sandbox -> Network Blocked -> Verification
-- SIH Demo Scenario 3: Confidential Knowledge Query -> Hybrid RAG -> Grounded Answer + Citations
-- SIH Demo Scenario 4: Industrial Engineering Image -> Preprocessing -> Vision Candidate Finding
-- SIH Demo Scenario 5 (Mixed End-to-End): Document + Vision + Knowledge + Data + Policy + Approval + DOCX Artifact
+- Demo Scenario 1: Scanned Inspection Report -> Findings -> Approval -> DOCX
+- Demo Scenario 2: Coding Task -> Policy/Approval -> Sandbox -> Network Blocked -> Verification
+- Demo Scenario 3: Confidential Knowledge Query -> Hybrid RAG -> Grounded Answer + Citations
+- Demo Scenario 4: Industrial Engineering Image -> Preprocessing -> Vision Candidate Finding
+- Demo Scenario 5 (Mixed End-to-End): Document + Vision + Knowledge + Data + Policy + Approval + DOCX Artifact
 - Zero-egress enforcement and truthful failure transparency
 """
 
@@ -211,11 +211,11 @@ def test_acceptance_12_docx_and_xlsx_generation_and_reopen(tmp_path):
 
 
 # --------------------------------------------------------------------------
-# SIH Demonstration Scenario 1: Scanned Inspection Report -> Approval Note (DOCX)
+# Demonstration Scenario 1: Scanned Inspection Report -> Approval Note (DOCX)
 # --------------------------------------------------------------------------
 
-def test_sih_demo_scenario_1_scanned_report_to_approval_note(tmp_path):
-    """SIH Demonstration Scenario 1:
+def test_demo_scenario_1_scanned_report_to_approval_note(tmp_path):
+    """Demonstration Scenario 1:
     Local scanned report -> Visual/Document inspection -> Candidate findings -> Approval -> DOCX Note
     """
     img_p = str(tmp_path / "flange_inspection.png")
@@ -229,7 +229,7 @@ def test_sih_demo_scenario_1_scanned_report_to_approval_note(tmp_path):
 
     state = orch.run(
         query,
-        task_id="sih_demo_scenario_1",
+        task_id="demo_scenario_1",
         file_path=img_p,
     )
 
@@ -246,11 +246,11 @@ def test_sih_demo_scenario_1_scanned_report_to_approval_note(tmp_path):
 
 
 # --------------------------------------------------------------------------
-# SIH Demonstration Scenario 2: Coding Task -> Sandbox -> Network Blocked -> Verification
+# Demonstration Scenario 2: Coding Task -> Sandbox -> Network Blocked -> Verification
 # --------------------------------------------------------------------------
 
-def test_sih_demo_scenario_2_coding_task_sandbox(tmp_path):
-    """SIH Demonstration Scenario 2:
+def test_demo_scenario_2_coding_task_sandbox(tmp_path):
+    """Demonstration Scenario 2:
     Coding task -> Code generation -> Policy requires approval -> Sandbox execution -> Network blocked -> Verified
     """
     csv_p = str(tmp_path / "stats.csv")
@@ -262,7 +262,7 @@ def test_sih_demo_scenario_2_coding_task_sandbox(tmp_path):
     # First run pauses for approval because sandbox_execute is HIGH risk
     state_pause = orch.run(
         query,
-        task_id="sih_demo_scenario_2",
+        task_id="demo_scenario_2",
         csv_path=csv_p,
     )
 
@@ -278,7 +278,7 @@ def test_sih_demo_scenario_2_coding_task_sandbox(tmp_path):
         approver="Chief Engineer",
         plan_hash=app_req.get("plan_hash", ""),
     )
-    final_state = orch.submit_approval("sih_demo_scenario_2", decision)
+    final_state = orch.submit_approval("demo_scenario_2", decision)
 
     # Workflow completes successfully inside the isolated sandbox
     assert final_state["task_status"] == TaskStatus.COMPLETED.value
@@ -286,11 +286,11 @@ def test_sih_demo_scenario_2_coding_task_sandbox(tmp_path):
 
 
 # --------------------------------------------------------------------------
-# SIH Demonstration Scenario 3: Confidential Knowledge Question -> Hybrid RAG -> Grounded
+# Demonstration Scenario 3: Confidential Knowledge Question -> Hybrid RAG -> Grounded
 # --------------------------------------------------------------------------
 
-def test_sih_demo_scenario_3_confidential_knowledge_rag(tmp_path):
-    """SIH Demonstration Scenario 3:
+def test_demo_scenario_3_confidential_knowledge_rag(tmp_path):
+    """Demonstration Scenario 3:
     Confidential knowledge query for pump PX-417 -> Hybrid RAG -> Evidence Pack -> Grounded Answer + Citations
     """
     manifest_p = str(tmp_path / "rag_px417_manifest.json")
@@ -318,11 +318,11 @@ def test_sih_demo_scenario_3_confidential_knowledge_rag(tmp_path):
 
 
 # --------------------------------------------------------------------------
-# SIH Demonstration Scenario 4: Engineering Image -> Preprocessing -> Vision Candidate Finding
+# Demonstration Scenario 4: Engineering Image -> Preprocessing -> Vision Candidate Finding
 # --------------------------------------------------------------------------
 
-def test_sih_demo_scenario_4_engineering_vision_candidate(tmp_path):
-    """SIH Demonstration Scenario 4:
+def test_demo_scenario_4_engineering_vision_candidate(tmp_path):
+    """Demonstration Scenario 4:
     Equipment image -> Local preprocessing -> Candidate observation without fabricating certified conclusion
     """
     img_p = str(tmp_path / "equipment_sample.png")
@@ -342,12 +342,12 @@ def test_sih_demo_scenario_4_engineering_vision_candidate(tmp_path):
 
 
 # --------------------------------------------------------------------------
-# SIH Demonstration Scenario 5 (Mixed Multi-Agent Integration):
+# Demonstration Scenario 5 (Mixed Multi-Agent Integration):
 # Document + Vision + Knowledge + Data + Policy + Approval + DOCX Artifact
 # --------------------------------------------------------------------------
 
-def test_sih_demo_scenario_5_mixed_end_to_end_orchestration(tmp_path):
-    """SIH Mixed End-to-End Scenario:
+def test_demo_scenario_5_mixed_end_to_end_orchestration(tmp_path):
+    """Mixed End-to-End Scenario:
     "Analyze this inspection report, check the maintenance procedure for the equipment, "
     "calculate the reported measurements, and prepare an approval note."
     
@@ -366,7 +366,7 @@ def test_sih_demo_scenario_5_mixed_end_to_end_orchestration(tmp_path):
 
     state = orch.run(
         query,
-        task_id="sih_mixed_end_to_end",
+        task_id="mixed_end_to_end",
         file_path=img_p,
         csv_path=csv_p,
     )

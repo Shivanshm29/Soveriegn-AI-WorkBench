@@ -1,6 +1,6 @@
 # Sovereign On-Premise Agentic AI Workbench
 
-**SIH 2026 — Problem Statement 26117**
+**Enterprise Confidential & Air-Gapped Industrial AI**
 
 A model-agnostic, self-hosted, multimodal agentic AI workbench for confidential industrial knowledge work.
 
@@ -59,6 +59,6 @@ Agents must never hard-code model names. They request capabilities; the Model Ro
 
 ## Source basis
 
-The SIH submission defines the sovereign workbench, the workflow `UNDERSTAND → ROUTE → PLAN → APPROVE → EXECUTE → VERIFY → DELIVER`, adaptive model routing, multimodal document processing, policy/human approval, agent execution, and traceability.
+The workbench architecture defines the sovereign workflow `UNDERSTAND → ROUTE → PLAN → APPROVE → EXECUTE → VERIFY → DELIVER`, adaptive model routing, multimodal document processing, policy/human approval, agent execution, and traceability.
 
 The project documents in this folder turn that architecture into concrete implementation contracts and acceptance gates.

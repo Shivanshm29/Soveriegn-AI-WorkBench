@@ -227,7 +227,7 @@ All mandatory acceptance tests are automated.
 
 ---
 
-## Phase 14 — SIH demonstration build
+## Phase 14 — End-to-end demonstration build
 
 ### Demo A
 Scanned inspection report → SOP retrieval → approval note DOCX.

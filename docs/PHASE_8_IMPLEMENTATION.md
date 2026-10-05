@@ -17,24 +17,24 @@ Every component in Phase 8 executes **100% locally and on-premise**:
 
 ## 1. Package Location & Module Architecture
 
-The Phase 8 implementation is located in [`backend/app/rag/`](file:///c:/Users/shiva/Desktop/college/sih/sih2/sih-sovereign-workbench-initial/backend/app/rag/):
+The Phase 8 implementation is located in [`backend/app/rag/`](../backend/app/rag/):
 
 | Module | Path | Responsibilities |
 |---|---|---|
-| Package Root | [`backend/app/rag/__init__.py`](file:///c:/Users/shiva/Desktop/college/sih/sih2/sih-sovereign-workbench-initial/backend/app/rag/__init__.py) | Exports primary interfaces, agent factory, and schemas |
-| Schemas | [`backend/app/rag/schemas.py`](file:///c:/Users/shiva/Desktop/college/sih/sih2/sih-sovereign-workbench-initial/backend/app/rag/schemas.py) | Data contracts (`KnowledgeChunk`, `RetrievalResult`, `EvidencePack`, `GroundedAnswer`, `IndexManifest`) |
-| Ingestion Pipeline | [`backend/app/rag/ingestion.py`](file:///c:/Users/shiva/Desktop/college/sih/sih2/sih-sovereign-workbench-initial/backend/app/rag/ingestion.py) | Document loading, hashing, normalization, chunking, and index updates |
-| Chunker | [`backend/app/rag/chunker.py`](file:///c:/Users/shiva/Desktop/college/sih/sih2/sih-sovereign-workbench-initial/backend/app/rag/chunker.py) | Structure-aware chunking preserving headings, paragraphs, and tables |
-| Embedder | [`backend/app/rag/embedder.py`](file:///c:/Users/shiva/Desktop/college/sih/sih2/sih-sovereign-workbench-initial/backend/app/rag/embedder.py) | Local embedding generation with dimension checks and deterministic cache |
-| Vector Store | [`backend/app/rag/vector_store.py`](file:///c:/Users/shiva/Desktop/college/sih/sih2/sih-sovereign-workbench-initial/backend/app/rag/vector_store.py) | Local Qdrant client abstraction for collection lifecycle, upsert, and search |
-| Lexical Index | [`backend/app/rag/lexical_index.py`](file:///c:/Users/shiva/Desktop/college/sih/sih2/sih-sovereign-workbench-initial/backend/app/rag/lexical_index.py) | Local BM25+ index supporting exact part IDs, keywords, and technical symbols |
-| Hybrid Retriever | [`backend/app/rag/hybrid_retriever.py`](file:///c:/Users/shiva/Desktop/college/sih/sih2/sih-sovereign-workbench-initial/backend/app/rag/hybrid_retriever.py) | Dual retrieval coordination and deterministic Reciprocal Rank Fusion (RRF) |
-| Query Processor | [`backend/app/rag/query_processor.py`](file:///c:/Users/shiva/Desktop/college/sih/sih2/sih-sovereign-workbench-initial/backend/app/rag/query_processor.py) | Deterministic query parsing, identifier extraction, and filter generation |
-| Grounded Generation | [`backend/app/rag/grounded_generation.py`](file:///c:/Users/shiva/Desktop/college/sih/sih2/sih-sovereign-workbench-initial/backend/app/rag/grounded_generation.py) | Grounded LLM generation, citation generation, and deterministic verification |
-| Manifest Store | [`backend/app/rag/manifest.py`](file:///c:/Users/shiva/Desktop/college/sih/sih2/sih-sovereign-workbench-initial/backend/app/rag/manifest.py) | Audit trail and version manifests for indexed knowledge sources |
-| Knowledge Agent | [`backend/app/rag/knowledge_agent.py`](file:///c:/Users/shiva/Desktop/college/sih/sih2/sih-sovereign-workbench-initial/backend/app/rag/knowledge_agent.py) | High-level `KnowledgeAgent` facade registered with `AgentRegistry` |
-| Tools | [`backend/app/rag/tools.py`](file:///c:/Users/shiva/Desktop/college/sih/sih2/sih-sovereign-workbench-initial/backend/app/rag/tools.py) | 5 registered `ToolContract` tools for ingestion, search, retrieval, verification, and deletion |
-| Errors | [`backend/app/rag/errors.py`](file:///c:/Users/shiva/Desktop/college/sih/sih2/sih-sovereign-workbench-initial/backend/app/rag/errors.py) | Structured hierarchy of RAG exceptions |
+| Package Root | [`backend/app/rag/__init__.py`](../backend/app/rag/__init__.py) | Exports primary interfaces, agent factory, and schemas |
+| Schemas | [`backend/app/rag/schemas.py`](../backend/app/rag/schemas.py) | Data contracts (`KnowledgeChunk`, `RetrievalResult`, `EvidencePack`, `GroundedAnswer`, `IndexManifest`) |
+| Ingestion Pipeline | [`backend/app/rag/ingestion.py`](../backend/app/rag/ingestion.py) | Document loading, hashing, normalization, chunking, and index updates |
+| Chunker | [`backend/app/rag/chunker.py`](../backend/app/rag/chunker.py) | Structure-aware chunking preserving headings, paragraphs, and tables |
+| Embedder | [`backend/app/rag/embedder.py`](../backend/app/rag/embedder.py) | Local embedding generation with dimension checks and deterministic cache |
+| Vector Store | [`backend/app/rag/vector_store.py`](../backend/app/rag/vector_store.py) | Local Qdrant client abstraction for collection lifecycle, upsert, and search |
+| Lexical Index | [`backend/app/rag/lexical_index.py`](../backend/app/rag/lexical_index.py) | Local BM25+ index supporting exact part IDs, keywords, and technical symbols |
+| Hybrid Retriever | [`backend/app/rag/hybrid_retriever.py`](../backend/app/rag/hybrid_retriever.py) | Dual retrieval coordination and deterministic Reciprocal Rank Fusion (RRF) |
+| Query Processor | [`backend/app/rag/query_processor.py`](../backend/app/rag/query_processor.py) | Deterministic query parsing, identifier extraction, and filter generation |
+| Grounded Generation | [`backend/app/rag/grounded_generation.py`](../backend/app/rag/grounded_generation.py) | Grounded LLM generation, citation generation, and deterministic verification |
+| Manifest Store | [`backend/app/rag/manifest.py`](../backend/app/rag/manifest.py) | Audit trail and version manifests for indexed knowledge sources |
+| Knowledge Agent | [`backend/app/rag/knowledge_agent.py`](../backend/app/rag/knowledge_agent.py) | High-level `KnowledgeAgent` facade registered with `AgentRegistry` |
+| Tools | [`backend/app/rag/tools.py`](../backend/app/rag/tools.py) | 5 registered `ToolContract` tools for ingestion, search, retrieval, verification, and deletion |
+| Errors | [`backend/app/rag/errors.py`](../backend/app/rag/errors.py) | Structured hierarchy of RAG exceptions |
 
 ---
 
@@ -224,7 +224,7 @@ All 384 tests in the test suite pass with zero failures:
 - [x] Phase 2 zero-egress remains enforced.
 - [x] No cloud service is required.
 - [x] No P9+ functionality is implemented (sandbox execution remains blocked).
-- [x] End-to-end SIH knowledge-query demo passes (`PX-417` maintenance and inspection).
+- [x] End-to-end knowledge-query demo passes (`PX-417` maintenance and inspection).
 
 ---
 

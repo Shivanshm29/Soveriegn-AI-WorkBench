@@ -32,4 +32,4 @@
 
 ## Release rule
 
-The SIH demo release requires A01–A27 to pass or have an explicitly documented hardware-dependent exception.
+The production workbench release requires A01–A27 to pass or have an explicitly documented hardware-dependent exception.

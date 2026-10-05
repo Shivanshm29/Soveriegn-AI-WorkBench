@@ -1,4 +1,4 @@
-﻿"""Phase 8 acceptance test suite covering all 30 acceptance criteria."""
+"""Phase 8 acceptance test suite covering all 30 acceptance criteria."""
 
 import pytest
 from tests.fixtures.rag_fixtures import (
@@ -336,8 +336,8 @@ def test_no_cloud_service_required(tmp_path):
     assert isinstance(results, list)
 
 
-def test_sih_demo_end_to_end(populated):
-    """Full SIH demo knowledge query."""
+def test_demo_end_to_end(populated):
+    """Full demo knowledge query."""
     answer = populated.grounded_answer(
         query="What were the last inspection findings for pump PX-417, and what does the maintenance procedure recommend?",
         top_k=8,

@@ -76,7 +76,7 @@ def test_task_state_serialization_roundtrip():
     task = TaskState(
         task_id="task-003",
         user_query="Generate Excel summary",
-        context={"project": "SIH"},
+        context={"project": "Industrial"},
         metadata={"priority": "high"},
     )
     step = ExecutionStep(

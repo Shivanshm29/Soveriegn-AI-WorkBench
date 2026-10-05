@@ -1,4 +1,4 @@
-﻿# Phase 7 Implementation Report — Engineering Drawing & Industrial Vision Agent
+# Phase 7 Implementation Report — Engineering Drawing & Industrial Vision Agent
 
 ## Executive Summary
 
@@ -270,7 +270,7 @@ A production-grade fix was applied to prevent Qwen3/Qwen2.5 models from producin
 | tests/test_vision_agent.py | End-to-end process_image() and process_pdf_drawing() pipeline |
 | tests/test_vision_tools.py | Tool contract registration and capability mapping |
 | tests/test_vision_langgraph_integration.py | LangGraph routing to vision_agent and result propagation |
-| tests/acceptance/test_phase_7_acceptance.py | Full Phase 7 acceptance criteria (21 checks + SIH demo target) |
+| tests/acceptance/test_phase_7_acceptance.py | Full Phase 7 acceptance criteria (21 checks + demo target) |
 
 Unit test result: 204 passed, 0 failed (Phases 0-7 regression suite).
 

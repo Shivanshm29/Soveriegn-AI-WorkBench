@@ -36,7 +36,7 @@ print("\n[TEST 1] PDF Document Summarization")
 pdf_task = post_json("/api/v1/tasks", {
     "instruction": "Summarize this ppt",
     "data_sensitivity": "INTERNAL",
-    "file_path": "data/uploads/5700b716_SIH2026-IDEA-Presentation-Format (1).pdf"
+    "file_path": "data/uploads/5700b716_industrial_spec_format.pdf"
 })
 print(f"Task ID: {pdf_task.get('task_id')}, Status: {pdf_task.get('status')}")
 pdf_result = pdf_task.get("final_result") or {}

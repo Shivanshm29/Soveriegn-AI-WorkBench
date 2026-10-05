@@ -1,4 +1,4 @@
-﻿"""Phase 8 core RAG component tests covering A–Z acceptance criteria."""
+"""Phase 8 core RAG component tests covering A–Z acceptance criteria."""
 
 import pytest
 from tests.fixtures.rag_fixtures import (
@@ -715,12 +715,12 @@ def test_AG_embedder_uses_local_hash_fallback():
 
 
 # ---------------------------------------------------------------------------
-# AH. End-to-end knowledge query (SIH Demo Target)
+# AH. End-to-end knowledge query (Demo Target)
 # ---------------------------------------------------------------------------
 
-def test_AH_end_to_end_sih_knowledge_query(populated_agent):
+def test_AH_end_to_end_knowledge_query(populated_agent):
     """
-    SIH Demo: User asks about PX-417 inspection findings and maintenance procedure.
+    Demo: User asks about PX-417 inspection findings and maintenance procedure.
     System performs hybrid retrieval, constructs evidence pack, generates grounded answer.
     """
     answer = populated_agent.grounded_answer(

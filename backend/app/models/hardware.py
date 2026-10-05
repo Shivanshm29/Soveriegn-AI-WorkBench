@@ -62,7 +62,8 @@ def _get_ram_info() -> tuple[Optional[float], Optional[float]]:
 
 
 def _get_gpu_info() -> tuple[bool, Optional[str], Optional[float], Optional[float]]:
-    """Safe probe for GPU capability without crashing on CPU-only machines."""
+    """Safe probe for GPU capability across PyTorch, Apple Silicon Metal, and system CLI."""
+    # 1. PyTorch CUDA / ROCm
     try:
         import torch
 
@@ -78,6 +79,31 @@ def _get_gpu_info() -> tuple[bool, Optional[str], Optional[float], Optional[floa
                     free_gb = round(free_bytes / (1024**3), 2)
                 except Exception:
                     pass
+                return True, name, total_gb, free_gb
+        
+        # Apple Silicon Metal Performance Shaders (MPS)
+        if hasattr(torch, "backends") and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            return True, "Apple Silicon GPU (Metal / MPS)", None, None
+    except Exception:
+        pass
+
+    # 2. System CLI fallback: nvidia-smi
+    try:
+        import subprocess
+        res = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name,memory.total,memory.free", "--format=csv,noheader,nounits"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            first_line = res.stdout.strip().split("\n")[0]
+            parts = [p.strip() for p in first_line.split(",")]
+            if parts:
+                name = parts[0]
+                total_gb = round(float(parts[1]) / 1024, 2) if len(parts) > 1 and parts[1].replace(".", "").isdigit() else None
+                free_gb = round(float(parts[2]) / 1024, 2) if len(parts) > 2 and parts[2].replace(".", "").isdigit() else None
                 return True, name, total_gb, free_gb
     except Exception:
         pass
